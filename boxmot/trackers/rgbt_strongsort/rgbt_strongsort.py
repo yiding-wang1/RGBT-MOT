@@ -64,14 +64,25 @@ class RGBT_StrongSort(object):
             weights=reid_weights, device=device, half=half
         ).model
 
-        self.tracker = Tracker(
-            metric=NearestNeighborDistanceMetric("cosine", max_cos_dist, nn_budget),
-            max_iou_dist=max_iou_dist,
-            max_age=max_age,
-            n_init=n_init,
-            mc_lambda=mc_lambda,
-            ema_alpha=ema_alpha,
-        )
+        if self.seperate_track:
+            self.tracker = Tracker(
+                metric=NearestNeighborDistanceMetric("cosine", max_cos_dist, nn_budget),
+                max_iou_dist=max_iou_dist,
+                max_age=max_age,
+                n_init=n_init,
+                mc_lambda=mc_lambda,
+                ema_alpha=ema_alpha,
+            )
+        else:
+
+            self.tracker = Tracker(
+                metric=NearestNeighborDistanceMetric("cosine", max_cos_dist, nn_budget),
+                max_iou_dist=max_iou_dist,
+                max_age=max_age,
+                n_init=n_init,
+                mc_lambda=mc_lambda,
+                ema_alpha=ema_alpha,
+            )
         self.cmc = get_cmc_method('ecc')()
         self.frame_num = 0
 
@@ -95,9 +106,6 @@ class RGBT_StrongSort(object):
 
     @BaseTracker.per_class_decorator
     def update(self, visible_dets: np.ndarray, visible_img: np.ndarray,
-               # infrared_dets: np.ndarray,  infrared_img: np.ndarray,
-               visible_embs: np.ndarray = None,
-               # infrared_embs: np.ndarray = None
                ) -> np.ndarray:
         assert isinstance(
             visible_dets, np.ndarray
@@ -112,18 +120,6 @@ class RGBT_StrongSort(object):
                 visible_dets.shape[1] == 6
         ), "Unsupported 'dets' 2nd dimension lenght, valid lenghts is 6"
 
-        # assert isinstance(
-        #     infrared_dets, np.ndarray
-        # ), f"Unsupported 'dets' input format '{type(infrared_dets)}', valid format is np.ndarray"
-        # assert isinstance(
-        #     infrared_img, np.ndarray
-        # ), f"Unsupported 'img' input format '{type(infrared_img)}', valid format is np.ndarray"
-        # assert (
-        #     len(infrared_dets.shape) == 2
-        # ), "Unsupported 'dets' dimensions, valid number of dimensions is two"
-        # assert (
-        #     infrared_dets.shape[1] == 6
-        # ), "Unsupported 'dets' 2nd dimension lenght, valid lenghts is 6"
 
         # read img_pairs,
 
