@@ -12,6 +12,8 @@ from boxmot.appearance.reid_auto_backend import ReidAutoBackend
 from boxmot.motion.cmc import get_cmc_method
 from boxmot.trackers.rgbt_strongsort.sort.detection import Detection
 from boxmot.trackers.rgbt_strongsort.sort.rgbt_tracker import Tracker
+from boxmot.trackers.rgbt_strongsort.sort.sep_tracker import SeperateTracker
+
 from boxmot.utils.matching import NearestNeighborDistanceMetric
 from boxmot.utils.ops import xyxy2tlwh
 from boxmot.trackers.rgbtbasetracker import RgbtBaseTracker
@@ -63,9 +65,9 @@ class RGBT_StrongSort(object):
         self.model = ReidAutoBackend(
             weights=reid_weights, device=device, half=half
         ).model
-
+        self.seperate_track = True
         if self.seperate_track:
-            self.tracker = Tracker(
+            self.tracker = SeperateTracker(
                 metric=NearestNeighborDistanceMetric("cosine", max_cos_dist, nn_budget),
                 max_iou_dist=max_iou_dist,
                 max_age=max_age,
@@ -74,7 +76,6 @@ class RGBT_StrongSort(object):
                 ema_alpha=ema_alpha,
             )
         else:
-
             self.tracker = Tracker(
                 metric=NearestNeighborDistanceMetric("cosine", max_cos_dist, nn_budget),
                 max_iou_dist=max_iou_dist,
@@ -129,7 +130,8 @@ class RGBT_StrongSort(object):
         infrared_img = self.infrared_img_list[self.frame_num]
         visible_img = cv2.imread(os.path.join(self.img_path, 'visible', visible_img))
         infrared_img = cv2.imread(os.path.join(self.img_path, 'infrared', infrared_img))
-        infrared_img = infrared_preprocess(infrared_img)
+        # infrared_img = infrared_preprocess(infrared_img)
+        # visible_img = infrared_preprocess(visible_img)
 
         visible_dets = self.visible_dets_list[self.frame_num] if self.frame_num in self.visible_dets_list.keys() \
             else np.zeros(shape=(0,8))
@@ -228,12 +230,13 @@ class RGBT_StrongSort(object):
             infrared_outputs = np.concatenate(infrared_outputs)
         else:
             infrared_outputs = np.array([])
-        # print(f"visible_outputs{visible_outputs}")
+
+        # print(f"visible_outputs:{visible_outputs}")
         # print(f"infrared_outputs:{infrared_outputs}")
 
         if self.visualize:
             show_both_result(visible_outputs, infrared_outputs, visible_img, infrared_img, self.frame_num)
-
+            # show_both_det(visible_xyxy, infrared_xyxy, visible_img, infrared_img, self.frame_num)
         if self.save_output:
             save_both_results()
 
@@ -382,9 +385,6 @@ def show_both_result(visible_outputs, infrared_outputs, visible_img, infrared_im
     color = (0, 0, 255)  # BGR
     thickness = 2
     fontscale = 0.5
-    # if True:
-    #     for x in visible_xyxy:
-    #         x1,y1,x2,y2=x
     if len(visible_outputs) != 0:
         for x in visible_outputs:
             x1, y1, x2, y2, id, conf, cls, ind = x
@@ -404,9 +404,6 @@ def show_both_result(visible_outputs, infrared_outputs, visible_img, infrared_im
                 color,
                 thickness
             )
-    # if True:
-    #     for x in infrared_xyxy:
-    #         x1, y1, x2, y2 = x
     if len(infrared_outputs) != 0:
         for x in infrared_outputs:
             x1, y1, x2, y2, id, conf, cls, ind = x
@@ -428,10 +425,54 @@ def show_both_result(visible_outputs, infrared_outputs, visible_img, infrared_im
                 thickness
             )
     combined_img = cv2.hconcat([visible_img, infrared_img])
-    cv2.imwrite(f"./output_imgs/{frame_num}.jpg", combined_img)
-    # combined_img = cv2.resize(combined_img, (0, 0), fx=0.5, fy=0.5)
-    # cv2.imshow('frame', combined_img)
-    # cv2.waitKey()
+    # cv2.imwrite(f"./output_imgs/{frame_num}.jpg", combined_img)
+    combined_img = cv2.resize(combined_img, (0, 0), fx=0.5, fy=0.5)
+    cv2.imshow('frame', combined_img)
+    cv2.waitKey()
+
+    return
+
+def show_both_det(visible_xyxy, infrared_xyxy, visible_img, infrared_img, frame_num):
+    color = (0, 0, 255)  # BGR
+    thickness = 2
+    fontscale = 0.5
+    if True:
+        for x in visible_xyxy:
+            x1,y1,x2,y2=x
+    # if len(visible_outputs) != 0:
+    #     for x in visible_outputs:
+    #         x1, y1, x2, y2, id, conf, cls, ind = x
+            cv2.rectangle(
+                visible_img,
+                (int(x1), int(y1)),
+                (int(x2), int(y2)),
+                color,
+                thickness
+            )
+    if True:
+        for x in infrared_xyxy:
+            x1, y1, x2, y2 = x
+            cv2.rectangle(
+                infrared_img,
+                (int(x1), int(y1)),
+                (int(x2), int(y2)),
+                color,
+                thickness
+            )
+            cv2.putText(
+                infrared_img,
+                f'{id} ',  # f'id: {id}, conf: {conf}, c: {cls}',
+                (int(x1), int(y1) - 10),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                fontscale,
+                color,
+                thickness
+            )
+    combined_img = cv2.hconcat([visible_img, infrared_img])
+    # cv2.imwrite(f"./output_imgs/{frame_num}.jpg", combined_img)
+    combined_img = cv2.resize(combined_img, (0, 0), fx=0.5, fy=0.5)
+    cv2.imshow('frame', combined_img)
+    cv2.waitKey()
 
     return
 

@@ -72,7 +72,7 @@ class Tracker:
             ema_alpha=0.9,
             mc_lambda=0.995,
             deep_track_dist=0.5,
-            pos_track_dist=0.7
+            pos_track_dist=0.6
     ):
         self.metric = metric
         self.max_iou_dist = max_iou_dist
@@ -388,23 +388,6 @@ class Tracker:
 
         # 第一层：视觉匹配 ：
         # 筛选需要匹配的轨迹集合，计算相似度矩阵，计算匈牙利匹配，整理输出轨迹集合
-        # matched_track_pairs_a, unmatched_visible_tracks_a, unmatched_infrared_tracks_a \
-        #     = self._crossmodality_match(
-        #     confirmed_visible_tracks,
-        #     confirmed_infrared_tracks,
-        #     _nn_cosine_distance,
-        #     self.deep_track_dist,
-        #     "deep"
-        # )
-        #
-        # matched_track_pairs_b, _, _ = self._crossmodality_match(
-        #     unmatched_visible_tracks_a,
-        #     unmatched_infrared_tracks_a,
-        #     _nn_euclidean_distance,
-        #     self.pos_track_dist,
-        #     "pos"
-        # )
-        # matches = matched_track_pairs_a + matched_track_pairs_b
 
         matched_track_pairs_a, unmatched_visible_tracks_a, unmatched_infrared_tracks_a \
             = self._crossmodality_match(
@@ -426,8 +409,8 @@ class Tracker:
             self.pos_track_dist,
             "pos"
         )
-        # matches = list(set(matched_track_pairs_a).union(set(matched_track_pairs_b)))
-        matches = matched_track_pairs_b
+        matches = list(set(matched_track_pairs_a).intersection(set(matched_track_pairs_b)))
+        # matches = matched_track_pairs_b
 
         # 输出管理：增加匹配轨迹，删除已匹配轨迹
         self.paired_crossmodel_ids += matches
@@ -465,18 +448,18 @@ class Tracker:
         if len(visible_features) == 0 or len(infrared_features) == 0:
             return [], visible_id, infrared_id  # Nothing to match.
 
-        visible_features = np.array(visible_features)
-        infrared_features = np.array(infrared_features)
+        visible_features_ = copy.deepcopy(np.array(visible_features))
+        infrared_features = copy.deepcopy(np.array(infrared_features))
 
-        if feat == 'pos':  # adjust pos based on global bias/icp algorithm
-            transfer_mat, score = self.ps_bbox_translation(visible_features, infrared_features)
-            self.pos_track_rate = score*2
-            self.deep_track_rate = 2 - score*2
-            distance_thres = distance_thres * self.pos_track_rate
-            visible_features = self.bias_adjust(visible_features, transfer_mat)
-            print("transfer matrix:", transfer_mat, visible_features)
+        # if feat == 'pos':  # adjust pos based on global bias/icp algorithm
+        #     transfer_mat, score = self.ps_bbox_translation(visible_features_, infrared_features)
+        #     self.pos_track_rate = score*2
+        #     self.deep_track_rate = 2 - score*2
+        #     distance_thres = distance_thres * self.pos_track_rate
+        #     visible_features_ = self.bias_adjust(visible_features_, transfer_mat)
+        #     print("transfer matrix:", transfer_mat)
 
-        cost_matrix = self.track_feature_distance(visible_features, infrared_features, metric_function)
+        cost_matrix = self.track_feature_distance(visible_features_, infrared_features, metric_function)
         print(feat, cost_matrix)
         cost_matrix[cost_matrix > distance_thres] = distance_thres + 1e-5
         row_indices, col_indices = linear_sum_assignment(cost_matrix)
@@ -614,11 +597,12 @@ class Tracker:
     def bias_adjust(self, adjust_features, trasfer_mat):
         # bias = self.ransac_bias()
         # # a = np.array(adjust_features[:,0:2]) + np.array([bias[0:2]])
-        adjust_features[:, 0] = adjust_features[:, 0] * trasfer_mat[0, 0] + trasfer_mat[0, 2]
-        adjust_features[:, 1] = adjust_features[:, 1] * trasfer_mat[1, 1] + trasfer_mat[1, 2]
-        adjust_features[:, 2] *= trasfer_mat[0, 0]
-        adjust_features[:, 3] *= trasfer_mat[1, 1]
-        return adjust_features
+        adjust_features_ = np.zeros(shape=adjust_features.shape)
+        adjust_features_[:, 0] = adjust_features[:, 0] * trasfer_mat[0, 0] + trasfer_mat[0, 2]
+        adjust_features_[:, 1] = adjust_features[:, 1] * trasfer_mat[1, 1] + trasfer_mat[1, 2]
+        adjust_features_[:, 2] *= trasfer_mat[0, 0]
+        adjust_features_[:, 3] *= trasfer_mat[1, 1]
+        return adjust_features_
 
     def update_bias_set(self, visible_track_, infrared_track_):
         v_mean = visible_track_.mean[0:2]
