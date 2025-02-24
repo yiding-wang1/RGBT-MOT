@@ -204,7 +204,7 @@ def parse_opt():
                         help='file/dir/URL/glob, 0 for webcam')
     parser.add_argument('--track_all', default=True,
                         help='track all subsets at once')
-    parser.add_argument('--track_id', type=int, default=0,
+    parser.add_argument('--track_id', type=str, default='',
                         help='track all subsets at once')
 
     parser.add_argument('--imgsz', '--img', '--img-size', nargs='+', type=int, default=None,
@@ -262,9 +262,8 @@ if __name__ == "__main__":
         track_id = 0
         for path in os.scandir(opt.dataset_source):
             if path.is_dir():
-                opt.track_id = track_id
+                opt.track_id = os.path.abspath(path)
                 opt.source = os.path.join(path, 'visible')
-                track_id += 1
                 run(opt)
     else:
         run(opt)

@@ -174,10 +174,10 @@ class Tracker:
         # 模块输入：单模态轨迹ids *2 跨模态轨迹对ids*1
         # 4.1
         for track_idx, detection_idx in visible_matches:  # 更新匹配成功的轨迹集合：对单模态轨迹ids *2分别运行 update+partial_fit
-            if track_idx in self.single_visible_ids:
+            if self.visible_tracks[track_idx].id in self.single_visible_ids:
                 self.visible_tracks[track_idx].update_pos_and_state(visible_detections[detection_idx])
         for track_idx, detection_idx in infrared_matches:
-            if track_idx in self.single_infrared_ids:
+            if self.infrared_tracks[track_idx].id in self.single_infrared_ids:
                 self.infrared_tracks[track_idx].update_pos_and_state(infrared_detections[detection_idx])
 
         # 4.2 更新匹配成功的轨迹集合：跨模态轨迹对ids*1 运行update+partial_fit
@@ -232,9 +232,7 @@ class Tracker:
                     infrared_track_,
                     infrared_det_
                 )
-                # self.visible_tracks[visible_track_idx].update_pos_and_state(visible_detections[visible_detection_idx])
-                # self.infrared_tracks[infrared_track_idx].update_pos_and_state(infrared_detections[infrared_detection_idx])
-                visible_track_.update_pos_and_state(visible_det_)  # ?
+                visible_track_.update_pos_and_state(visible_det_)
                 infrared_track_.update_pos_and_state(infrared_det_)
                 self.update_bias_set(visible_track_, infrared_track_)
 
@@ -399,18 +397,18 @@ class Tracker:
         )
 
         matched_track_pairs_b, _, _ = self._crossmodality_match(
-            [t[0] for t in matched_track_pairs_a],
-            [t[1] for t in matched_track_pairs_a],
+            # [t[0] for t in matched_track_pairs_a],
+            # [t[1] for t in matched_track_pairs_a],
             # unmatched_visible_tracks_a,
             # unmatched_infrared_tracks_a,
-            # confirmed_visible_tracks,
-            # confirmed_infrared_tracks,
+            confirmed_visible_tracks,
+            confirmed_infrared_tracks,
             _nn_iou_distance,
             self.pos_track_dist,
             "pos"
         )
-        matches = list(set(matched_track_pairs_a).intersection(set(matched_track_pairs_b)))
-        # matches = matched_track_pairs_b
+        # matches = list(set(matched_track_pairs_a).intersection(set(matched_track_pairs_b)))
+        matches = matched_track_pairs_b
 
         # 输出管理：增加匹配轨迹，删除已匹配轨迹
         self.paired_crossmodel_ids += matches
@@ -449,15 +447,15 @@ class Tracker:
             return [], visible_id, infrared_id  # Nothing to match.
 
         visible_features_ = copy.deepcopy(np.array(visible_features))
-        infrared_features = copy.deepcopy(np.array(infrared_features))
+        infrared_features = np.array(infrared_features)
 
-        # if feat == 'pos':  # adjust pos based on global bias/icp algorithm
-        #     transfer_mat, score = self.ps_bbox_translation(visible_features_, infrared_features)
-        #     self.pos_track_rate = score*2
-        #     self.deep_track_rate = 2 - score*2
-        #     distance_thres = distance_thres * self.pos_track_rate
-        #     visible_features_ = self.bias_adjust(visible_features_, transfer_mat)
-        #     print("transfer matrix:", transfer_mat)
+        if feat == 'pos':  # adjust pos based on global bias/icp algorithm
+            transfer_mat, score = self.ps_bbox_translation(visible_features_, infrared_features)
+            self.pos_track_rate = score*2
+            self.deep_track_rate = 2 - score*2
+            distance_thres = distance_thres * self.pos_track_rate
+            visible_features_ = self.bias_adjust(visible_features_, transfer_mat)
+            print("transfer matrix:", transfer_mat)
 
         cost_matrix = self.track_feature_distance(visible_features_, infrared_features, metric_function)
         print(feat, cost_matrix)
@@ -600,8 +598,8 @@ class Tracker:
         adjust_features_ = np.zeros(shape=adjust_features.shape)
         adjust_features_[:, 0] = adjust_features[:, 0] * trasfer_mat[0, 0] + trasfer_mat[0, 2]
         adjust_features_[:, 1] = adjust_features[:, 1] * trasfer_mat[1, 1] + trasfer_mat[1, 2]
-        adjust_features_[:, 2] *= trasfer_mat[0, 0]
-        adjust_features_[:, 3] *= trasfer_mat[1, 1]
+        adjust_features_[:, 2] = adjust_features[:, 2] * trasfer_mat[0, 0]
+        adjust_features_[:, 3] = adjust_features[:, 3] * trasfer_mat[1, 1]
         return adjust_features_
 
     def update_bias_set(self, visible_track_, infrared_track_):
@@ -899,25 +897,28 @@ class Tracker:
 
         return translation, score
 
-    def ps_bbox_translation(self, source_, target_, max_iterations=200):
+    def ps_bbox_translation(self, source_, target_, max_iterations=100):
         """
         Rosenbrock 函数的实现
         :param x: 输入的变量，形状为 (n_particles, dimensions),n*[dx,dy,rx,ry]
         :return: 每个粒子对应的函数值，形状为 (n_particles,)
         """
+        from pyswarms.utils.plotters import (plot_cost_history, plot_contour, plot_surface)
+        import matplotlib.pyplot as plt
 
         def rosenbrock(x, source, target):
             x = np.asarray(x)
             score = []
-            ori_source = copy.deepcopy(source)
+            # ori_source = copy.deepcopy(source)
+            s_ = copy.deepcopy(source)
             for x_ in x:
                 # 计算source的变换，xywh格式
-                source[:, 0] = x_[2] * ori_source[:, 0] + x_[0]
-                source[:, 1] = x_[3] * ori_source[:, 1] + x_[1]
-                source[:, 2] = x_[2] * ori_source[:, 2]
-                source[:, 3] = x_[3] * ori_source[:, 3]
+                s_[:, 0] = x_[2] * source[:, 0] + x_[0]
+                s_[:, 1] = x_[3] * source[:, 1] + x_[1]
+                s_[:, 2] = x_[2] * source[:, 2]
+                s_[:, 3] = x_[3] * source[:, 3]
 
-                source_xyxy = np.hstack((source[:, :2] - source[:, 2:] / 2, source[:, :2] + source[:, 2:] / 2))
+                source_xyxy = np.hstack((s_[:, :2] - s_[:, 2:] / 2, s_[:, :2] + s_[:, 2:] / 2))
                 target_xyxy = np.hstack((target[:, :2] - target[:, 2:] / 2, target[:, :2] + target[:, 2:] / 2))
                 boxes1 = torch.tensor(source_xyxy, dtype=torch.float)
                 boxes2 = torch.tensor(target_xyxy, dtype=torch.float)
@@ -932,13 +933,19 @@ class Tracker:
         source = copy.deepcopy(source_)
         dimensions = 4
         bounds = (np.array([-50, -50, 0.8, 0.8]), np.array([50, 50, 1.2, 1.2]))
-        options = {'c1': 0.5, 'c2': 0.3, 'w': 0.9}
+        options = {'c1': 2, 'c2': 0.5, 'w': 0.9}
         optimized_rosenbrock = lambda x: rosenbrock(x, source, target_)
 
         # 创建全局最优 PSO 优化器
-        optimizer = ps.single.GlobalBestPSO(n_particles=10, dimensions=dimensions, options=options, bounds=bounds)
+        optimizer = ps.single.GlobalBestPSO(n_particles=20, dimensions=dimensions, options=options, bounds=bounds)
         cost, pos = optimizer.optimize(optimized_rosenbrock, iters=max_iterations)
 
+        # plot_cost_history(cost_history=optimizer.cost_history)
+        # # pos_history = np.array(optimizer.pos_history)[:,:,:2]
+        # # plot_contour(pos_history)
+        # plt.show()
+
+        # generate output
         trans_mat = np.eye(3)
         trans_mat[0, 2] = pos[0]
         trans_mat[1, 2] = pos[1]

@@ -65,6 +65,8 @@ class RGBT_StrongSort(object):
         self.model = ReidAutoBackend(
             weights=reid_weights, device=device, half=half
         ).model
+
+        # whether track different model seperately
         self.seperate_track = True
         if self.seperate_track:
             self.tracker = SeperateTracker(
@@ -87,7 +89,11 @@ class RGBT_StrongSort(object):
         self.cmc = get_cmc_method('ecc')()
         self.frame_num = 0
 
-        self.img_path = 'E:/lasher/LasHeR_Unalined_960_0615/seleted/2ndboyfarintheforest2right'#blackboy' #2ndboyfarintheforest2right'
+        if track_all:
+            self.img_path = track_id
+        else:
+            self.img_path = 'E:/lasher/LasHeR_Unalined_960_0615/seleted/2ndboyfarintheforest2right'#blackboy' #2ndboyfarintheforest2right'
+
         self.dataset_path = 'E:/lasher/LasHeR_Unalined_960_0615/seleted'
         self.visible_img_list = get_img_names(self.img_path, 'visible')
         self.infrared_img_list = get_img_names(self.img_path, 'infrared')
@@ -97,11 +103,12 @@ class RGBT_StrongSort(object):
         self.visible_dets_list = get_img_dets(self.img_path, 'visible/det', self.frame_len)
         self.infrared_dets_list = get_img_dets(self.img_path, 'infrared/det', self.frame_len)
 
-        self.visualize = True
-        self.save_output = False
+        self.visualize = False
+        self.save_output = True
         self.track_id = track_id
         self.track_all = track_all
-        self.output_path = "./output/rgbt-sort"
+
+        self.output_path = "../output_tracks/" +os.path.basename(self.img_path)
 
         # os.environ["CUDA VISIBLE DEVICES"] = "0"
 
@@ -130,8 +137,8 @@ class RGBT_StrongSort(object):
         infrared_img = self.infrared_img_list[self.frame_num]
         visible_img = cv2.imread(os.path.join(self.img_path, 'visible', visible_img))
         infrared_img = cv2.imread(os.path.join(self.img_path, 'infrared', infrared_img))
-        # infrared_img = infrared_preprocess(infrared_img)
-        # visible_img = infrared_preprocess(visible_img)
+        infrared_img = infrared_preprocess(infrared_img)
+        visible_img = infrared_preprocess(visible_img)
 
         visible_dets = self.visible_dets_list[self.frame_num] if self.frame_num in self.visible_dets_list.keys() \
             else np.zeros(shape=(0,8))
@@ -238,7 +245,7 @@ class RGBT_StrongSort(object):
             show_both_result(visible_outputs, infrared_outputs, visible_img, infrared_img, self.frame_num)
             # show_both_det(visible_xyxy, infrared_xyxy, visible_img, infrared_img, self.frame_num)
         if self.save_output:
-            save_both_results()
+            save_both_results(self.frame_num, save_path=self.output_path, visible_outputs=visible_outputs, infrared_outputs=infrared_outputs)
 
         return np.array([])
 
@@ -427,8 +434,8 @@ def show_both_result(visible_outputs, infrared_outputs, visible_img, infrared_im
     combined_img = cv2.hconcat([visible_img, infrared_img])
     # cv2.imwrite(f"./output_imgs/{frame_num}.jpg", combined_img)
     combined_img = cv2.resize(combined_img, (0, 0), fx=0.5, fy=0.5)
-    cv2.imshow('frame', combined_img)
-    cv2.waitKey()
+    # cv2.imshow('frame', combined_img)
+    # cv2.waitKey()
 
     return
 
@@ -471,45 +478,50 @@ def show_both_det(visible_xyxy, infrared_xyxy, visible_img, infrared_img, frame_
     combined_img = cv2.hconcat([visible_img, infrared_img])
     # cv2.imwrite(f"./output_imgs/{frame_num}.jpg", combined_img)
     combined_img = cv2.resize(combined_img, (0, 0), fx=0.5, fy=0.5)
-    cv2.imshow('frame', combined_img)
-    cv2.waitKey()
+    # cv2.imshow('frame', combined_img)
+    # cv2.waitKey()
 
     return
 
 
-def save_both_results(save_mot, frame_number, save_path, modality, visible_outputs, infrared_outputs,):
-    if save_mot and frame_number > 1:  # 写跟踪内容
-        fi = open(save_path, 'a+')
+def save_both_results(frame_number, save_path, visible_outputs, infrared_outputs):
 
-        if modality == 'visible':
-            for x in visible_outputs:
-                x1, y1, x2, y2, id, conf, cls, ind = x
-                fi.write(f"{frame_number - 1},"
-                         f"{id},"
-                         f"{x1},"
-                         f"{y1},"
-                         f"{x2-x1},"
-                         f"{y2-y1},1,"
-                         f"{cls},1"
-                         + '\n')
+    visible_path = save_path + '_visible.txt'
+    infrared_path = save_path + '_infrared.txt'
 
-        elif modality == 'infrared':
-            for x in infrared_outputs:
-                x1, y1, x2, y2, id, conf, cls, ind = x
-                fi.write(f"{frame_number - 1},"
-                         f"{id},"
-                         f"{x1},"
-                         f"{y1},"
-                         f"{x2-x1},"
-                         f"{y2-y1},1,"
-                         f"{cls},1"
-                         + '\n')
+    if frame_number > 1:
+        v_fi = open(visible_path, 'a+')
+        for x in visible_outputs:
+            x1, y1, x2, y2, id, conf, cls, ind = x
+            v_fi.write(f"{frame_number - 1},"
+                     f"{id},"
+                     f"{x1},"
+                     f"{y1},"
+                     f"{x2-x1},"
+                     f"{y2-y1},1,"
+                     f"{cls},1"
+                     + '\n')
+        v_fi.close()
 
-        fi.close()
-    elif frame_number == 1:
-        fi = open(save_path, 'w')
-        fi.close()
-    pass
+        i_fi = open(infrared_path, 'a+')
+        for x in infrared_outputs:
+            x1, y1, x2, y2, id, conf, cls, ind = x
+            i_fi.write(f"{frame_number - 1},"
+                     f"{id},"
+                     f"{x1},"
+                     f"{y1},"
+                     f"{x2-x1},"
+                     f"{y2-y1},1,"
+                     f"{cls},1"
+                     + '\n')
+        i_fi.close()
+
+    elif frame_number == 1:  # refresh history records
+        v_fi = open(visible_path, 'w')
+        v_fi.close()
+        i_fi = open(infrared_path, 'w')
+        i_fi.close()
+
 
 
 def xyxyn2xyxy(xyxyn, img_shape):
@@ -522,7 +534,7 @@ def xyxyn2xyxy(xyxyn, img_shape):
 
 
 def infrared_preprocess(image):
-    clahe = cv2.createCLAHE(clipLimit=8.0, tileGridSize=(8, 8))
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
 
     # 分离图像的三个通道
     b, g, r = cv2.split(image)
