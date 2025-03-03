@@ -92,7 +92,7 @@ class RGBT_StrongSort(object):
         if track_all:
             self.img_path = track_id
         else:
-            self.img_path = 'E:/lasher/LasHeR_Unalined_960_0615/seleted/2ndboyfarintheforest2right'#blackboy' #2ndboyfarintheforest2right'
+            self.img_path = 'E:/lasher/LasHeR_Unalined_960_0615/seleted/leftunderbasket'#blackboy' #2ndboyfarintheforest2right' leftunderbasket
 
         self.dataset_path = 'E:/lasher/LasHeR_Unalined_960_0615/seleted'
         self.visible_img_list = get_img_names(self.img_path, 'visible')
@@ -100,16 +100,18 @@ class RGBT_StrongSort(object):
         self.visible_img_size = cv2.imread(os.path.join(self.img_path, 'visible', self.visible_img_list[0])).shape
         self.infrared_img_size = cv2.imread(os.path.join(self.img_path, 'infrared', self.infrared_img_list[0])).shape
         self.frame_len = len(self.infrared_img_list)
-        self.visible_dets_list = get_img_dets(self.img_path, 'visible/det', self.frame_len)
-        self.infrared_dets_list = get_img_dets(self.img_path, 'infrared/det', self.frame_len)
+        self.visible_dets_list = get_img_dets(self.img_path, 'visible/det', self.frame_len, thres=0.4)
+        self.infrared_dets_list = get_img_dets(self.img_path, 'infrared/det', self.frame_len, thres=0.4)
 
-        self.visualize = False
-        self.save_output = True
+        self.visualize = not track_all
+        self.save_output = track_all
         self.track_id = track_id
         self.track_all = track_all
 
-        self.output_path = "../output_tracks/" +os.path.basename(self.img_path)
+        self.output_path = "../output_tracks/seperate_thres0.4/data/" +os.path.basename(self.img_path)
+        # self.output_path = "../../../TrackEval-master/TrackEval-master/data/tracks/228/data/" +os.path.basename(self.img_path)
 
+        # "../../../TrackEval-master/TrackEval-master/data/tracks/228/data/"
         # os.environ["CUDA VISIBLE DEVICES"] = "0"
 
     @BaseTracker.per_class_decorator
@@ -130,7 +132,6 @@ class RGBT_StrongSort(object):
 
 
         # read img_pairs,
-
         # shared_space image pairs
         # and det_results,
         visible_img = self.visible_img_list[self.frame_num]
@@ -141,9 +142,9 @@ class RGBT_StrongSort(object):
         visible_img = infrared_preprocess(visible_img)
 
         visible_dets = self.visible_dets_list[self.frame_num] if self.frame_num in self.visible_dets_list.keys() \
-            else np.zeros(shape=(0,8))
+            else np.zeros(shape=(0, 8))
         infrared_dets = self.infrared_dets_list[self.frame_num] if self.frame_num in self.infrared_dets_list.keys() \
-            else np.zeros(shape=(0,8))
+            else np.zeros(shape=(0, 8))
 
         self.frame_num = self.frame_num + 1
         print(f'round {self.frame_num}')
@@ -171,7 +172,10 @@ class RGBT_StrongSort(object):
 
         # extract appearance information for each detection -- visible
         visible_features = self.model.get_features(visible_xyxy, visible_img)
-        share_visible_features = self.get_modality_features_deen_vi(visible_xyxy, visible_img)
+        if True:#self.seperate_track:
+            share_visible_features = visible_features
+        else:
+            share_visible_features = self.get_modality_features_deen_vi(visible_xyxy, visible_img)
         visible_tlwh = xyxy2tlwh(visible_xyxy)
         visible_detections = [
             Detection(box, conf, cls, det_ind, feat, share_feat) for
@@ -186,7 +190,10 @@ class RGBT_StrongSort(object):
 
         # extract appearance information for each detection -- infrared
         infrared_features = self.model.get_features(infrared_xyxy, infrared_img)
-        share_infrared_features = self.get_modality_features_deen_ir(infrared_xyxy, infrared_img)
+        if True:#self.seperate_track:
+            share_infrared_features = infrared_features
+        else:
+            share_infrared_features = self.get_modality_features_deen_ir(infrared_xyxy, infrared_img)
         infrared_tlwh = xyxy2tlwh(infrared_xyxy)
         infrared_detections = [
             Detection(box, conf, cls, det_ind, feat, share_feat) for
@@ -197,11 +204,11 @@ class RGBT_StrongSort(object):
 
         # update tracker with dual modality detections, within-modality features and cross-modality features
         self.tracker.predict()
-        self.tracker.update(visible_detections, infrared_detections)
+        self.tracker.update(visible_detections, infrared_detections, self.frame_num)
         # output bbox identities in both modality
         visible_outputs = []
         for track in self.tracker.visible_tracks:
-            if not track.is_confirmed() or track.time_since_update >= 1:
+            if not track.is_confirmed() or track.time_since_update >= 1: # 尚未确认、暂未更新
                 continue
 
             x1, y1, x2, y2 = track.to_tlbr()
@@ -246,7 +253,6 @@ class RGBT_StrongSort(object):
             # show_both_det(visible_xyxy, infrared_xyxy, visible_img, infrared_img, self.frame_num)
         if self.save_output:
             save_both_results(self.frame_num, save_path=self.output_path, visible_outputs=visible_outputs, infrared_outputs=infrared_outputs)
-
         return np.array([])
 
     def get_modality_features_deen_vi(self, modality_xyxys, modality_img):
@@ -258,9 +264,14 @@ class RGBT_StrongSort(object):
             normalize,
         ])
         outputs = []
+        providers = [("CUDAExecutionProvider", {"device_id": 0})]
+        # if 'TensorrtExecutionProvider' in providers:
+        #     providers = [("CUDAExecutionProvider", {"device_id": 0}), "CPUExecutionProvider"]
+        # else:
+        #     providers = ['CPUExecutionProvider']
         for xyxy in modality_xyxys:
             x1, y1, x2, y2 = xyxy.astype(int)
-            ort_session = ort.InferenceSession("./weights/deen_reid_vis.onnx")
+            ort_session = ort.InferenceSession("./weights/deen_reid_vis.onnx", providers=providers)
             input_data = modality_img[y1:y2, x1:x2]
             # 预处理图像
             input_tensor = transform_test(input_data)
@@ -277,7 +288,7 @@ class RGBT_StrongSort(object):
         return np.array(outputs)
 
     def get_modality_features_deen_ir(self, modality_xyxys, modality_img):
-        normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+        normalize = transforms.Normalize(mean=[0.496, 0.496, 0.496], std=[0.195, 0.195, 0.195])  # from ImageNet
         transform_test = transforms.Compose([
             transforms.ToPILImage(),
             transforms.Resize((384, 144)),
@@ -285,9 +296,14 @@ class RGBT_StrongSort(object):
             normalize,
         ])
         outputs = []
+        providers = [("CUDAExecutionProvider", {"device_id": 0})]
+        # if 'TensorrtExecutionProvider' in providers:
+        #     providers = [("CUDAExecutionProvider", {"device_id": 0}), "CPUExecutionProvider"]
+        # else:
+        #     providers = ['CPUExecutionProvider']
         for xyxy in modality_xyxys:
             x1, y1, x2, y2 = xyxy.astype(int)
-            ort_session = ort.InferenceSession("./weights/deen_reid_ir.onnx")
+            ort_session = ort.InferenceSession("./weights/deen_reid_ir.onnx", providers=providers)
             input_data = modality_img[y1:y2, x1:x2]
 
             # 预处理图像
@@ -347,7 +363,7 @@ def get_img_names(root_dir, sub_dir):
     return file_names
 
 
-def get_img_dets(root_dir, sub_dir, frame_len):
+def get_img_dets(root_dir, sub_dir, frame_len, thres):
     # 拼接指定子目录的完整路径
     target_dir = os.path.join(root_dir, sub_dir, 'det.csv')
     # 从完整文件路径中提取文件名
@@ -361,7 +377,8 @@ def get_img_dets(root_dir, sub_dir, frame_len):
                 float_value = float(value)
                 float_row.append(float_value)
             cls = int(float_row[6])
-            if cls!=0:
+            score = float(float_row[5])
+            if cls!=0 or score<thres:
                 continue
             try:
                 index = int(float_row[0])
@@ -432,9 +449,9 @@ def show_both_result(visible_outputs, infrared_outputs, visible_img, infrared_im
                 thickness
             )
     combined_img = cv2.hconcat([visible_img, infrared_img])
-    # cv2.imwrite(f"./output_imgs/{frame_num}.jpg", combined_img)
-    combined_img = cv2.resize(combined_img, (0, 0), fx=0.5, fy=0.5)
-    # cv2.imshow('frame', combined_img)
+    cv2.imwrite(f"./output_imgs/{frame_num}.jpg", combined_img)
+    # combined_img = cv2.resize(combined_img, (0, 0), fx=0.5, fy=0.5)
+    # cv2.imshow(f'frame {frame_num}', combined_img)
     # cv2.waitKey()
 
     return
@@ -443,52 +460,46 @@ def show_both_det(visible_xyxy, infrared_xyxy, visible_img, infrared_img, frame_
     color = (0, 0, 255)  # BGR
     thickness = 2
     fontscale = 0.5
-    if True:
-        for x in visible_xyxy:
-            x1,y1,x2,y2=x
-    # if len(visible_outputs) != 0:
-    #     for x in visible_outputs:
-    #         x1, y1, x2, y2, id, conf, cls, ind = x
-            cv2.rectangle(
-                visible_img,
-                (int(x1), int(y1)),
-                (int(x2), int(y2)),
-                color,
-                thickness
-            )
-    if True:
-        for x in infrared_xyxy:
-            x1, y1, x2, y2 = x
-            cv2.rectangle(
-                infrared_img,
-                (int(x1), int(y1)),
-                (int(x2), int(y2)),
-                color,
-                thickness
-            )
-            cv2.putText(
-                infrared_img,
-                f'{id} ',  # f'id: {id}, conf: {conf}, c: {cls}',
-                (int(x1), int(y1) - 10),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                fontscale,
-                color,
-                thickness
-            )
+    for x in visible_xyxy:
+        x1,y1,x2,y2=x
+        cv2.rectangle(
+            visible_img,
+            (int(x1), int(y1)),
+            (int(x2), int(y2)),
+            color,
+            thickness
+        )
+    for x in infrared_xyxy:
+        x1, y1, x2, y2 = x
+        cv2.rectangle(
+            infrared_img,
+            (int(x1), int(y1)),
+            (int(x2), int(y2)),
+            color,
+            thickness
+        )
+        cv2.putText(
+            infrared_img,
+            f'{id} ',  # f'id: {id}, conf: {conf}, c: {cls}',
+            (int(x1), int(y1) - 10),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            fontscale,
+            color,
+            thickness
+        )
     combined_img = cv2.hconcat([visible_img, infrared_img])
-    # cv2.imwrite(f"./output_imgs/{frame_num}.jpg", combined_img)
-    combined_img = cv2.resize(combined_img, (0, 0), fx=0.5, fy=0.5)
+    cv2.imwrite(f"./output_imgs/{frame_num}.jpg", combined_img)
+    # combined_img = cv2.resize(combined_img, (0, 0), fx=0.5, fy=0.5)
     # cv2.imshow('frame', combined_img)
     # cv2.waitKey()
-
     return
 
 
 def save_both_results(frame_number, save_path, visible_outputs, infrared_outputs):
-
+    if not os.path.exists(os.path.dirname(save_path)):
+        os.makedirs(os.path.dirname(save_path))
     visible_path = save_path + '_visible.txt'
     infrared_path = save_path + '_infrared.txt'
-
     if frame_number > 1:
         v_fi = open(visible_path, 'a+')
         for x in visible_outputs:
@@ -538,7 +549,6 @@ def infrared_preprocess(image):
 
     # 分离图像的三个通道
     b, g, r = cv2.split(image)
-
     # 对每个通道应用 CLAHE 算法
     b_clahe = clahe.apply(b)
     g_clahe = clahe.apply(g)

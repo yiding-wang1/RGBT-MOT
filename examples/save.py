@@ -22,7 +22,8 @@ def copy_csv_files(root_a, root_b):
                 print(f"已复制 {file_path_a} 到 {target_file_path}")
 
 # 定义根目录 a 和根目录 b 的路径
-root_a = '../../../dataset/csv_216_1/csv_216'
+# root_a = '../../../dataset/csv_216_1/csv_216'
+root_a = '../../../dataset/csv_32/csv_32'
 root_b = 'E:/lasher/LasHeR_Unalined_960_0615/seleted'
 
 # 调用函数进行文件复制

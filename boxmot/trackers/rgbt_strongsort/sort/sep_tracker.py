@@ -113,7 +113,7 @@ class SeperateTracker:
             track.increment_age()
             track.mark_missed()
 
-    def update(self, visible_detections, infrared_detections):
+    def update(self, visible_detections, infrared_detections, image_num):
         """Perform measurement update and track management.
 
         Parameters

@@ -194,7 +194,7 @@ class Track:
         self.hits += 1
         self.time_since_update = 0
         if self.state == TrackState.Tentative and self.hits >= self._n_init:
-            print(self.hits,'hit_enough')
+            # print(self.hits,'hit_enough')
             self.state = TrackState.Confirmed
 
     def mark_missed(self):

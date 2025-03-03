@@ -3,7 +3,7 @@ import time
 from collections import OrderedDict
 
 import torch
-from torch import nn
+# from torch import nn
 from boxmot.utils import logger as LOGGER
 
 # Model Factory and Construction
@@ -145,7 +145,7 @@ def get_model_url(model):
 def load_pretrained_weights(model, weight_path):
     """Loads pretrained weights to a model."""
     if not torch.cuda.is_available():
-        checkpoint = torch.load(weight_path, map_location=torch.device("cpu"))
+        checkpoint = torch.load(weight_path, map_location=torch.device("cpu"), weights_only=False)
     else:
         checkpoint = torch.load(weight_path)
 
