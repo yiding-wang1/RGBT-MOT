@@ -23,7 +23,7 @@ def copy_csv_files(root_a, root_b):
 
 # 定义根目录 a 和根目录 b 的路径
 # root_a = '../../../dataset/csv_216_1/csv_216'
-root_a = '../../../dataset/csv_32/csv_32'
+root_a = '../../../dataset/csv_36/csv_36'
 root_b = 'E:/lasher/LasHeR_Unalined_960_0615/seleted'
 
 # 调用函数进行文件复制

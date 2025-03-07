@@ -197,12 +197,12 @@ def parse_opt():
     parser.add_argument('--tracking-method', type=str, default='rgbt_strongsort',
                         help='deepocsort, botsort, strongsort, ocsort, bytetrack, imprassoc')
     parser.add_argument('--source', type=str,
-                        default='E:/lasher/LasHeR_Unalined_960_0615/seleted/leftunderbasket/visible/',
+                        default='E:/lasher/LasHeR_Unalined_960_0615/seleted/midof3girls/visible/',
                         help='file/dir/URL/glob, 0 for webcam')
     parser.add_argument('--dataset_source', type=str,
                         default='E:/lasher/LasHeR_Unalined_960_0615/seleted/',
                         help='file/dir/URL/glob, 0 for webcam')
-    parser.add_argument('--track_all', default=True,
+    parser.add_argument('--track_all', default=False,
                         help='track all subsets at once')
     parser.add_argument('--track_id', type=str, default='',
                         help='track all subsets at once')
@@ -257,7 +257,20 @@ def parse_opt():
 
 if __name__ == "__main__":
     opt = parse_opt()
-    train_set = []
+    train_set = [
+        "greenleftthewhite",
+        "leftunderbasket",
+        "blkboywithbluebag",
+        "blackboy",
+        "blueboywalking",
+        "blkcarfollowingwhite",
+        "boyatdoorturnright",
+        "boybackpack",
+        "e-tribike",
+        "manbikecoming",
+        "manwalkincars",
+        "midof3girls"
+    ]
     eval_set = [
         '2ndboyfarintheforest2right',
         'manfromcar302',
@@ -277,7 +290,8 @@ if __name__ == "__main__":
     if opt.track_all:
         track_id = 0
         for path in os.scandir(opt.dataset_source):
-            if path.is_dir():# and os.path.basename(path) in eval_set:
+            if path.is_dir() and os.path.basename(path) in train_set:
+                print(os.path.basename(path))
                 opt.track_id = os.path.abspath(path)
                 opt.source = os.path.join(path, 'visible')
                 run(opt)

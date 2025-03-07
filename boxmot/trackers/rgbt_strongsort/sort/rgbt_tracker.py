@@ -20,6 +20,13 @@ from scipy.optimize import linear_sum_assignment
 from boxmot.motion.kalman_filters.xyah_fkf import FederatedKalmanFilterXYAH
 
 
+class FKFMode:
+    miss2 = 0
+    miss_vi = 1
+    miss_ir = 2
+    both = 3
+
+
 class TrackState:
     """
     Enumeration type for the single target track state. Newly created tracks are
@@ -101,6 +108,8 @@ class Tracker:
         self.dt = 1.
         self.pos_track_rate = 1.
         self.deep_track_rate = 1.
+
+        self.pose_only = False
 
     def predict(self):
         """Propagate track state distributions one time step forward.
@@ -389,15 +398,15 @@ class Tracker:
 
         # 第一层：视觉匹配 ：
         # 筛选需要匹配的轨迹集合，计算相似度矩阵，计算匈牙利匹配，整理输出轨迹集合
-
-        matched_track_pairs_a, unmatched_visible_tracks_a, unmatched_infrared_tracks_a \
-            = self._crossmodality_match(
-            confirmed_visible_tracks,
-            confirmed_infrared_tracks,
-            _nn_cosine_distance,
-            self.deep_track_dist,
-            feat="deep"
-        )
+        if not self.pose_only:
+            matched_track_pairs_a, unmatched_visible_tracks_a, unmatched_infrared_tracks_a \
+                = self._crossmodality_match(
+                confirmed_visible_tracks,
+                confirmed_infrared_tracks,
+                _nn_cosine_distance,
+                self.deep_track_dist,
+                feat="deep"
+            )
 
         matched_track_pairs_b, _, _ = self._crossmodality_match(
             # [t[0] for t in matched_track_pairs_a],
@@ -412,9 +421,11 @@ class Tracker:
             all_infrared_tracks,
             "pos"
         )
+        if self.pose_only:
+            matches = matched_track_pairs_b
+        else:
+            matches = list(set(matched_track_pairs_a).intersection(set(matched_track_pairs_b)))
 
-        matches = list(set(matched_track_pairs_a).intersection(set(matched_track_pairs_b)))
-        # matches = matched_track_pairs_b
 
         # 输出管理1：删除不合理的已匹配轨迹对！！！！！！！
         self.delete_bad_track_pairs()
@@ -478,7 +489,7 @@ class Tracker:
 
         cost_matrix = self.track_feature_distance(visible_features_, infrared_features, metric_function)
         cost_matrix[cost_matrix > distance_thres] = distance_thres + 1e-5
-        print(feat, cost_matrix)
+        # print(feat, cost_matrix)
 
         row_indices, col_indices = linear_sum_assignment(cost_matrix)
 
@@ -503,7 +514,7 @@ class Tracker:
         # 遍历所有已匹配轨迹。满足一定标准，删除轨迹匹配关系
         # 该函数仅基于视觉特征实现。
         for t_pairs in self.paired_crossmodel_ids:
-            if feat =='pos':
+            if feat == 'pos':
                 vi_feat = copy.deepcopy(self.find_visible_track(t_pairs[0]).to_xywh())
                 ir_feat = self.find_infrared_track(t_pairs[1]).to_xywh()
                 bias = self.best_bias()
@@ -516,8 +527,8 @@ class Tracker:
                 boxes1 = torch.tensor([source_xyxy], dtype=torch.float)
                 boxes2 = torch.tensor([target_xyxy], dtype=torch.float)
                 distances = 1 - box_iou(boxes1, boxes2).numpy()  # smaller better
-                if distances > 0.99:#self.pos_track_dist+0.2:
-                    print(t_pairs, distances,"delete pairs!")
+                if distances > 0.8:  # self.pos_track_dist+0.2:
+                    print(t_pairs, distances, "delete pairs!")
                     self.paired_crossmodel_ids.remove(t_pairs)
                     self.single_visible_ids.append(t_pairs[0])
                     self.single_infrared_ids.append(t_pairs[1])
@@ -531,13 +542,13 @@ class Tracker:
     def update_fkf(self, visible_track_, visible_det, infrared_track_, infrared_det):
         # visible_track_ = self.visible_tracks[visible_track_idx]
         # visible_track_.bbox = visible_det.to_xyah()
-        visible_track_.conf = visible_det.conf
+        # visible_track_.conf = visible_det.conf
         # visible_track_.cls = visible_det.cls
         # visible_track_.det_ind = visible_det.det_ind
 
         # infrared_track_ = self.infrared_tracks[infrared_track_idx]
         # infrared_track_.bbox = infrared_det.to_xyah()
-        infrared_track_.conf = infrared_det.conf
+        # infrared_track_.conf = infrared_det.conf?????????????????????
         # infrared_track_.cls = infrared_det.cls
         # infrared_track_.det_ind = infrared_det.det_ind
 
@@ -550,7 +561,7 @@ class Tracker:
         # 输出：主滤波器（self），融合后子滤波器均值、协方差.
         # 在完成融合计算后，直接将融合滤波器结果更新子滤波器均值与方差
 
-        self._update_fkf(visible_track_, infrared_track_)
+        self._update_fkf(visible_track_, infrared_track_, FKFMode.both)
 
         # 更新指数移动平均：视觉特征、其他轨迹信息
         visible_track_.hits += 1
@@ -565,14 +576,14 @@ class Tracker:
             infrared_track_.state = TrackState.Confirmed
 
     def update_fkf_miss2(self, visible_track_, infrared_track_):
-        self._update_fkf(visible_track_, infrared_track_)
+        self._update_fkf(visible_track_, infrared_track_, FKFMode.miss2)
 
     def update_fkf_miss_visible(self, visible_track_, infrared_track_, infrared_det):
-        infrared_track_.conf = infrared_det.conf
-        self._update_fkf(visible_track_, infrared_track_)
+        # infrared_track_.conf = infrared_det.conf
+        self._update_fkf(visible_track_, infrared_track_, FKFMode.miss_vi)
         # 更新指数移动平均：视觉特征、其他轨迹信息
         visible_track_.hits += 1
-        visible_track_.time_since_update = 1.1  # 没对应检测，结果不输出
+        visible_track_.time_since_update = 0  # 没对应检测，结果不输出
         if visible_track_.state == TrackState.Tentative and visible_track_.hits >= visible_track_._n_init:
             visible_track_.state = TrackState.Confirmed
 
@@ -583,8 +594,8 @@ class Tracker:
             infrared_track_.state = TrackState.Confirmed
 
     def update_fkf_miss_infrared(self, visible_track_, infrared_track_, visible_det):
-        visible_track_.conf = visible_det.conf
-        self._update_fkf(visible_track_, infrared_track_)
+        # visible_track_.conf = visible_det.conf
+        self._update_fkf(visible_track_, infrared_track_, FKFMode.miss_ir)
         # 更新指数移动平均：视觉特征、其他轨迹信息
         visible_track_.hits += 1
         visible_track_.time_since_update = 0
@@ -593,24 +604,35 @@ class Tracker:
 
         # infrared features smooth update
         infrared_track_.hits += 1
-        infrared_track_.time_since_update = 1.1  # 没对应检测，结果不输出
+        infrared_track_.time_since_update = 0  # 没对应检测，结果不输出
         if infrared_track_.state == TrackState.Tentative and infrared_track_.hits >= infrared_track_._n_init:
             infrared_track_.state = TrackState.Confirmed
 
-    def _update_fkf(self, visible_track_, infrared_track_):
+    def _update_fkf(self, visible_track_, infrared_track_, mode=FKFMode.both):
         # 流程：子滤波器估计结果，
         # 1、取vel，加权平均得到融合速度；
         # 2、利用速度更新子滤波器状态；
         # 3、计算、分配子滤波器协方差；
         v_conf = visible_track_.conf
-        v_match_mean, v_match_covariance = copy.deepcopy(visible_track_.match_mean), copy.deepcopy(visible_track_.match_covariance)
+        v_match_mean, v_match_covariance = copy.deepcopy(visible_track_.match_mean), copy.deepcopy(
+            visible_track_.match_covariance)
         v_vel_mean = v_match_mean[4:8]
         v_vel_cov = v_match_covariance[4:, 4:]
 
         i_conf = infrared_track_.conf
-        i_match_mean, i_match_covariance = copy.deepcopy(infrared_track_.match_mean), copy.deepcopy(infrared_track_.match_covariance)
+        i_match_mean, i_match_covariance = copy.deepcopy(infrared_track_.match_mean), copy.deepcopy(
+            infrared_track_.match_covariance)
         i_vel_mean = i_match_mean[4:]
         i_vel_cov = i_match_covariance[4:, 4:]
+
+        if mode == FKFMode.both:
+            v_conf, i_conf = v_conf**3, i_conf**3
+        elif mode == FKFMode.miss_vi:
+            v_conf, i_conf = 0, i_conf
+        elif mode == FKFMode.miss_ir:
+            v_conf, i_conf = v_conf, 0
+        elif mode == FKFMode.miss2:
+            v_conf, i_conf = v_conf, i_conf
 
         # 按照匹配度，融合子滤波器均值并更新。匹配度构成：级联匹配处的特征相似度
         fkf_vel = (i_conf * i_vel_mean + v_conf * v_vel_mean) / (i_conf + v_conf)
@@ -654,8 +676,6 @@ class Tracker:
             # 从当前的一维高斯分布中进行采样
             samples = np.random.normal(mean, std, num_samples)
             all_samples.append(samples)
-        # 将采样结果转换为 numpy 数组
-        # samples = np.clip(samples, bounds[0], bounds[1])
         return np.clip(np.array(all_samples).T, bounds[0], bounds[1])
 
     def ransac_bias(self, num_iterations=10, distance_threshold=0.1, min_points=3):
