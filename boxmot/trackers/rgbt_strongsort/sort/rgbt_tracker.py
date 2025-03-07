@@ -109,7 +109,7 @@ class Tracker:
         self.pos_track_rate = 1.
         self.deep_track_rate = 1.
 
-        self.pose_only = False
+        self.pose_only = True
 
     def predict(self):
         """Propagate track state distributions one time step forward.
@@ -396,6 +396,9 @@ class Tracker:
         all_visible_tracks = [t.id for t in self.visible_tracks if t.is_confirmed()]
         all_infrared_tracks = [t.id for t in self.infrared_tracks if t.is_confirmed()]
 
+        # 输出管理1：删除不合理的已匹配轨迹对！！！！！！！
+        self.delete_bad_track_pairs()
+
         # 第一层：视觉匹配 ：
         # 筛选需要匹配的轨迹集合，计算相似度矩阵，计算匈牙利匹配，整理输出轨迹集合
         if not self.pose_only:
@@ -426,9 +429,6 @@ class Tracker:
         else:
             matches = list(set(matched_track_pairs_a).intersection(set(matched_track_pairs_b)))
 
-
-        # 输出管理1：删除不合理的已匹配轨迹对！！！！！！！
-        self.delete_bad_track_pairs()
 
         # 输出管理2：增加匹配轨迹对，删除已匹配轨迹
         self.paired_crossmodel_ids += matches
@@ -489,7 +489,7 @@ class Tracker:
 
         cost_matrix = self.track_feature_distance(visible_features_, infrared_features, metric_function)
         cost_matrix[cost_matrix > distance_thres] = distance_thres + 1e-5
-        # print(feat, cost_matrix)
+        print(feat, cost_matrix)
 
         row_indices, col_indices = linear_sum_assignment(cost_matrix)
 
@@ -527,7 +527,7 @@ class Tracker:
                 boxes1 = torch.tensor([source_xyxy], dtype=torch.float)
                 boxes2 = torch.tensor([target_xyxy], dtype=torch.float)
                 distances = 1 - box_iou(boxes1, boxes2).numpy()  # smaller better
-                if distances > 0.8:  # self.pos_track_dist+0.2:
+                if distances > 0.75:  # self.pos_track_dist+0.2:
                     print(t_pairs, distances, "delete pairs!")
                     self.paired_crossmodel_ids.remove(t_pairs)
                     self.single_visible_ids.append(t_pairs[0])

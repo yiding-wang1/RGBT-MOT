@@ -92,6 +92,7 @@ class RGBT_StrongSort(object):
 
         if track_all:
             self.img_path = track_id
+            self.subset = os.path.basename(track_id)
         else:
             self.img_path = 'E:/lasher/LasHeR_Unalined_960_0615/seleted/'+self.subset #blackboy' #2ndboyfarintheforest2right' leftunderbasket,midof3girls
 
@@ -109,7 +110,7 @@ class RGBT_StrongSort(object):
         self.track_id = track_id
         self.track_all = track_all
 
-        self.output_path = "../output_tracks/37_separate_c=0.5/data/" + os.path.basename(self.img_path)
+        self.output_path = "../output_tracks/37_pose_c=0.5/data/" + os.path.basename(self.img_path)
         # self.output_path = "../../../TrackEval-master/TrackEval-master/data/tracks/228/data/" +os.path.basename(self.img_path)
 
         # "../../../TrackEval-master/TrackEval-master/data/tracks/228/data/"
@@ -151,15 +152,15 @@ class RGBT_StrongSort(object):
         print(f'round {self.frame_num}')
 
         visible_dets = np.array(visible_dets, dtype=float)
-        visible_xyxy = visible_dets[:, 1:5].astype(float)
-        # visible_xyxy = xyxyn2xyxy(visible_xyxyn, self.visible_img_size)
+        visible_xyxyn = visible_dets[:, 1:5].astype(float)
+        visible_xyxy = xyxyn2xyxy(visible_xyxyn, self.visible_img_size)
         visible_confs = visible_dets[:, 5]
         visible_clss = visible_dets[:, 6].astype(int)
         visible_det_ind = visible_dets[:, 7].astype(int)
 
         infrared_dets = np.array(infrared_dets, dtype=float)
-        infrared_xyxy = infrared_dets[:, 1:5].astype(float)
-        # infrared_xyxy = xyxyn2xyxy(infrared_xyxyn, self.infrared_img_size)
+        infrared_xyxyn = infrared_dets[:, 1:5].astype(float)
+        infrared_xyxy = xyxyn2xyxy(infrared_xyxyn, self.infrared_img_size)
         infrared_confs = infrared_dets[:, 5]
         infrared_clss = infrared_dets[:, 6].astype(int)
         infrared_det_ind = infrared_dets[:, 7].astype(int)
@@ -173,7 +174,7 @@ class RGBT_StrongSort(object):
 
         # extract appearance information for each detection -- visible
         visible_features = self.model.get_features(visible_xyxy, visible_img)
-        if self.seperate_track:
+        if True:#self.seperate_track:
             share_visible_features = visible_features
         else:
             share_visible_features = self.get_modality_features_deen_vi(visible_xyxy, visible_img)
@@ -191,7 +192,7 @@ class RGBT_StrongSort(object):
 
         # extract appearance information for each detection -- infrared
         infrared_features = self.model.get_features(infrared_xyxy, infrared_img)
-        if self.seperate_track:
+        if True:#self.seperate_track:
             share_infrared_features = infrared_features
         else:
             share_infrared_features = self.get_modality_features_deen_ir(infrared_xyxy, infrared_img)
@@ -255,7 +256,7 @@ class RGBT_StrongSort(object):
             show_both_det(visible_xyxy, infrared_xyxy, copy.deepcopy(visible_img), copy.deepcopy(infrared_img), self.frame_num, self.subset, visible_confs, infrared_confs)
         if self.save_output:
             save_both_results(self.frame_num, save_path=self.output_path, visible_outputs=visible_outputs, infrared_outputs=infrared_outputs, paired_tracks=paired_tracks)
-            # show_both_result(visible_outputs, infrared_outputs, copy.deepcopy(visible_img), copy.deepcopy(infrared_img), self.frame_num, self.subset)
+            show_both_result(visible_outputs, infrared_outputs, copy.deepcopy(visible_img), copy.deepcopy(infrared_img), self.frame_num, self.subset)
         return np.array([])
 
     def get_modality_features_deen_vi(self, modality_xyxys, modality_img):
@@ -452,7 +453,7 @@ def show_both_result(visible_outputs, infrared_outputs, visible_img, infrared_im
                 thickness
             )
     combined_img = cv2.hconcat([visible_img, infrared_img])
-    save_path = f"./output_imgs_separate/{subset}/{frame_num}.jpg"
+    save_path = f"./output_imgs_pos/{subset}/{frame_num}.jpg"
     if not os.path.exists(os.path.dirname(save_path)):
         os.makedirs(os.path.dirname(save_path))
     cv2.imwrite(save_path, combined_img)

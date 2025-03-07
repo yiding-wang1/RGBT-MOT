@@ -202,7 +202,7 @@ def parse_opt():
     parser.add_argument('--dataset_source', type=str,
                         default='E:/lasher/LasHeR_Unalined_960_0615/seleted/',
                         help='file/dir/URL/glob, 0 for webcam')
-    parser.add_argument('--track_all', default=False,
+    parser.add_argument('--track_all', default=True,
                         help='track all subsets at once')
     parser.add_argument('--track_id', type=str, default='',
                         help='track all subsets at once')
@@ -287,10 +287,22 @@ if __name__ == "__main__":
         'whiteboybike',
         'whiteboyright'
     ]
+    eval_hard_set = [
+        'leftunderbasket',
+        'blueboywalking',
+        'blkcarfollowingwhite',
+        'boybackpack',
+        'e-tribike',
+        'manbikecoming',
+        'midof3girls',
+        '2ndboyfarintheforest2right',
+        'righthunchblack',
+        'e-tricycle'
+    ]
     if opt.track_all:
         track_id = 0
         for path in os.scandir(opt.dataset_source):
-            if path.is_dir() and os.path.basename(path) in train_set:
+            if path.is_dir() and os.path.basename(path) in eval_hard_set:
                 print(os.path.basename(path))
                 opt.track_id = os.path.abspath(path)
                 opt.source = os.path.join(path, 'visible')
