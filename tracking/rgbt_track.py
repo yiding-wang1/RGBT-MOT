@@ -197,7 +197,7 @@ def parse_opt():
     parser.add_argument('--tracking-method', type=str, default='rgbt_strongsort',
                         help='deepocsort, botsort, strongsort, ocsort, bytetrack, imprassoc')
     parser.add_argument('--source', type=str,
-                        default='E:/lasher/LasHeR_Unalined_960_0615/seleted/midof3girls/visible/',
+                        default='E:/lasher/LasHeR_Unalined_960_0615/seleted/righthunchblack/visible/',
                         help='file/dir/URL/glob, 0 for webcam')
     parser.add_argument('--dataset_source', type=str,
                         default='E:/lasher/LasHeR_Unalined_960_0615/seleted/',
@@ -296,8 +296,7 @@ if __name__ == "__main__":
         'manbikecoming',
         'midof3girls',
         '2ndboyfarintheforest2right',
-        'righthunchblack',
-        'e-tricycle'
+        'righthunchblack'
     ]
     if opt.track_all:
         track_id = 0

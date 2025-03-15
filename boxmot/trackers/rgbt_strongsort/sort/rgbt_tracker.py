@@ -73,13 +73,20 @@ class Tracker:
             self,
             metric,
             max_iou_dist=0.9,
-            max_age=30,
+            max_age=10,
             n_init=3,
             _lambda=0,
             ema_alpha=0.9,
+            conf_ema_alpha=0.5,
+            bias_ema_alpha=0.95,
             mc_lambda=0.995,
             deep_track_dist=0.45,
-            pos_track_dist=0.5
+            pos_track_dist=0.6,
+            pair_delete_pos_thres=0.65,
+            pair_delete_time_thres=20,
+            pair_delete_deep_thres=0.55,
+            soft_nms_thres=0.75,
+            exp_id=''
     ):
         self.metric = metric
         self.max_iou_dist = max_iou_dist
@@ -87,9 +94,16 @@ class Tracker:
         self.n_init = n_init
         self._lambda = _lambda
         self.ema_alpha = ema_alpha
+        self.conf_ema_alpha = conf_ema_alpha
         self.mc_lambda = mc_lambda
         self.deep_track_dist = deep_track_dist
         self.pos_track_dist = pos_track_dist
+        self.pair_delete_pos_thres = pair_delete_pos_thres
+        self.pair_delete_time_thres = pair_delete_time_thres
+        self.pair_delete_deep_thres = pair_delete_deep_thres
+        self.soft_nms_thres = soft_nms_thres
+        self.bias_ema_alpha = bias_ema_alpha
+        self.exp_id = exp_id
 
         self.visible_tracks = []
         self.infrared_tracks = []
@@ -100,7 +114,6 @@ class Tracker:
 
         self.paired_bias_set = []
         self.frame_num = 0
-
         self._next_id = 1
         self.cmc = get_cmc_method('ecc')()
 
@@ -110,6 +123,8 @@ class Tracker:
         self.deep_track_rate = 1.
 
         self.pose_only = True
+
+        self.save_args()
 
     def predict(self):
         """Propagate track state distributions one time step forward.
@@ -139,6 +154,8 @@ class Tracker:
 
         """
         self.frame_num = frame_num
+        # self.bias_score_ema()
+
         # Run matching cascade.  # 对可见光、红外分别进行轨迹与检测目标的级联匹配
         visible_matches, visible_unmatched_tracks, visible_unmatched_detections = self._match(visible_detections,
                                                                                               'visible')
@@ -246,6 +263,12 @@ class Tracker:
                 visible_track_.update_pos_and_state(visible_det_)
                 infrared_track_.update_pos_and_state(infrared_det_)
 
+        # self.delete_time_adjust()
+        if self.pose_only:
+            self.delete_bad_track_pairs()
+        else:
+            self.delete_bad_track_pairs('pos_deep_time')
+        self.soft_nms()
         # 5.Update distance metric. necessary! since original procedure should be maintained
 
         active_visible_targets = [t.id for t in self.visible_tracks if t.is_confirmed()]
@@ -267,7 +290,13 @@ class Tracker:
             np.asarray(features), np.asarray(targets), active_targets
         )
         print(
-            f"visible_trackers:{active_visible_targets} infrared_trackers:{active_infrared_targets} pairs:{self.paired_crossmodel_ids}")
+            f"visible_trackers:{active_visible_targets} infrared_trackers:{active_infrared_targets} \npairs:{self.paired_crossmodel_ids}")
+        print(f'v-time-since-update{[f.time_since_update for f in self.visible_tracks if f.id in active_visible_targets]}')
+        print(f'v-pair-time-since-update{[f.pair_time_since_update for f in self.visible_tracks if f.id in active_visible_targets]}')
+
+        print(f'i-time-since-update{[f.time_since_update for f in self.infrared_tracks if f.id in active_infrared_targets]}')
+        print(
+            f'i-pair-time-since-update{[f.pair_time_since_update for f in self.infrared_tracks if f.id in active_infrared_targets]}')
 
     def _match(self, detections, modality):
         def gated_metric(tracks, dets, track_indices, detection_indices):
@@ -369,6 +398,7 @@ class Tracker:
                     self.n_init,
                     self.max_age,
                     self.ema_alpha,
+                    self.conf_ema_alpha
                 )
             )
             self._next_id += 1
@@ -381,6 +411,7 @@ class Tracker:
                     self.n_init,
                     self.max_age,
                     self.ema_alpha,
+                    self.conf_ema_alpha
                 )
             )
             self._next_id += 1
@@ -393,46 +424,72 @@ class Tracker:
                                      t.is_confirmed() and t.id in self.single_infrared_ids]
         unconfirmed_visible_tracks = [t.id for t in self.visible_tracks if t.is_confirmed()]
         unconfirmed_infrared_tracks = [t.id for t in self.infrared_tracks if t.is_confirmed()]
-        all_visible_tracks = [t.id for t in self.visible_tracks if t.is_confirmed()]
-        all_infrared_tracks = [t.id for t in self.infrared_tracks if t.is_confirmed()]
+        all_visible_tracks = [t.id for t in self.visible_tracks if t.is_confirmed() and t.time_since_update<=1]
+        all_infrared_tracks = [t.id for t in self.infrared_tracks if t.is_confirmed() and t.time_since_update<=1]
 
         # 输出管理1：删除不合理的已匹配轨迹对！！！！！！！
-        self.delete_bad_track_pairs()
 
         # 第一层：视觉匹配 ：
         # 筛选需要匹配的轨迹集合，计算相似度矩阵，计算匈牙利匹配，整理输出轨迹集合
-        if not self.pose_only:
-            matched_track_pairs_a, unmatched_visible_tracks_a, unmatched_infrared_tracks_a \
-                = self._crossmodality_match(
-                confirmed_visible_tracks,
-                confirmed_infrared_tracks,
-                _nn_cosine_distance,
-                self.deep_track_dist,
-                feat="deep"
-            )
+        # if not self.pose_only:
+        #     matched_track_pairs_a, unmatched_visible_tracks_a, unmatched_infrared_tracks_a \
+        #         = self._crossmodality_match(
+        #         confirmed_visible_tracks,
+        #         confirmed_infrared_tracks,
+        #         _nn_cosine_distance,
+        #         self.deep_track_dist,
+        #         feat="deep"
+        #     )
+        if self.frame_num>30:
+            pass
 
         matched_track_pairs_b, _, _ = self._crossmodality_match(
-            # [t[0] for t in matched_track_pairs_a],
-            # [t[1] for t in matched_track_pairs_a],
+            all_visible_tracks,
+            all_infrared_tracks,
             # unmatched_visible_tracks_a,
             # unmatched_infrared_tracks_a,
-            confirmed_visible_tracks,
-            confirmed_infrared_tracks,
+            # confirmed_visible_tracks,
+            # confirmed_infrared_tracks,
             _nn_iou_distance,
             self.pos_track_dist,
             all_visible_tracks,
             all_infrared_tracks,
             "pos"
         )
-        if self.pose_only:
-            matches = matched_track_pairs_b
-        else:
-            matches = list(set(matched_track_pairs_a).intersection(set(matched_track_pairs_b)))
+        matches = matched_track_pairs_b
 
+        # print('before new match', self.paired_crossmodel_ids)
+        # deep feat update
+        if not self.pose_only:
+            for m in matches:
+                f_vi = self.find_visible_track(m[0]).share_modality_features[-1]
+                f_ir = self.find_infrared_track(m[1]).share_modality_features[-1]
+                # d = _nn_cosine_distance(f_vi, f_ir)
+                d = 1.0 - np.dot(f_vi, f_ir.T)
+                if d>self.deep_track_dist:
+                    matches.remove(m)
 
-        # 输出管理2：增加匹配轨迹对，删除已匹配轨迹
-        self.paired_crossmodel_ids += matches
-        for i in matches:
+        # 输出管理2：增加匹配轨迹对，删除已匹配轨迹,！！！！！！！！！！！！！！！！可优化
+        vi_in_matches = [t[0] for t in matches]
+        ir_in_matches = [t[1] for t in matches]
+        p_ids = copy.deepcopy(self.paired_crossmodel_ids)
+        for m in p_ids:
+            if (m[0] in vi_in_matches) or (m[1] in ir_in_matches):
+                self.single_visible_ids.append(m[0])
+                self.single_visible_ids = list(set(self.single_visible_ids))
+                self.single_infrared_ids.append(m[1])
+                self.single_infrared_ids = list(set(self.single_infrared_ids))
+                self.paired_crossmodel_ids.remove(m)
+                # if m not in self.paired_crossmodel_ids:
+                #     if m[0] in vi_in_matches:
+                #         self.find_infrared_track(m[1]).time_since_update += 1
+                #     elif m[1] in ir_in_matches:
+                #         self.find_visible_track(m[0]).time_since_update += 1
+
+        self.paired_crossmodel_ids = list(set(matches + self.paired_crossmodel_ids))
+        # print('after new match', self.paired_crossmodel_ids)
+
+        for i in self.paired_crossmodel_ids:
             if i[0] in self.single_visible_ids:
                 self.single_visible_ids.remove(i[0])
             if i[1] in self.single_infrared_ids:
@@ -479,18 +536,12 @@ class Tracker:
         if feat == 'pos':  # adjust pos based on global bias/icp algorithm
             if np.mod(self.frame_num, 10) == 0 or self.paired_bias_set == []:
                 pose, score = self.ps_bbox_translation(all_visible_features_, all_infrared_features)
-            # pose, score = self.ps_bbox_translation(visible_features_, infrared_features)
-            # self.pos_track_rate = 2-score * 2
-            # self.deep_track_rate = score*2
-            # distance_thres = distance_thres * self.pos_track_rate
             else:
                 pose = self.best_bias()
             visible_features_ = self.bias_adjust(visible_features_, pose)
 
         cost_matrix = self.track_feature_distance(visible_features_, infrared_features, metric_function)
         cost_matrix[cost_matrix > distance_thres] = distance_thres + 1e-5
-        print(feat, cost_matrix)
-
         row_indices, col_indices = linear_sum_assignment(cost_matrix)
 
         pairs, unpaired_visible, unpaired_infrared = [], [], []
@@ -508,30 +559,163 @@ class Tracker:
                 unpaired_infrared.append(infrared_idx)
             else:
                 pairs.append((visible_idx, infrared_idx))
+
         return pairs, unpaired_visible, unpaired_infrared
 
-    def delete_bad_track_pairs(self, feat='pos'):
+    def delete_time_adjust(self):
+        def iou(bbox1,bbox2):
+            source_xyxy = np.hstack((bbox1[:2] - bbox1[2:] / 2, bbox1[:2] + bbox1[2:] / 2))
+            target_xyxy = np.hstack((bbox2[:2] - bbox2[2:] / 2, bbox2[:2] + bbox2[2:] / 2))
+            boxes1 = torch.tensor([source_xyxy], dtype=torch.float)
+            boxes2 = torch.tensor([target_xyxy], dtype=torch.float)
+            return box_iou(boxes1, boxes2).numpy()
+
+        all_visible_tracks = [t for t in self.visible_tracks if t.is_confirmed() and t.time_since_update < 1]
+        all_infrared_tracks = [t for t in self.infrared_tracks if t.is_confirmed() and t.time_since_update < 1]
+        all_iou = []
+        for i, t1 in enumerate(all_visible_tracks):
+            for j, t2 in enumerate(all_visible_tracks[i+1:]):
+                all_iou.append(iou(t1.to_xywh(), t2.to_xywh())[0][0])
+
+        for i, t1 in enumerate(all_infrared_tracks):
+            for j, t2 in enumerate(all_infrared_tracks[i+1:]):
+                all_iou.append(iou(t1.to_xywh(), t2.to_xywh())[0][0])
+        self.pair_delete_time_thres = max(10 - np.sum(all_iou)*50, 6)
+        print("delete time", self.pair_delete_time_thres, np.mean(all_iou))
+
+    def delete_time_adjust_iou(self, pairs):
+        vi_bbox = self.find_visible_track(pairs[0]).to_xywh()
+        ir_bbox = self.find_infrared_track(pairs[1]).to_xywh()
+
+        all_vi_bboxes = [t.to_xywh() for t in self.visible_tracks if t.is_confirmed() and t.time_since_update < 1]
+        all_ir_bboxes = [t.to_xywh() for t in self.infrared_tracks if t.is_confirmed() and t.time_since_update < 1]
+        all_iou = []
+        vi_iou = 1 - _nn_iou_distance(np.array([vi_bbox]), np.array(all_vi_bboxes))
+        vi_iou[vi_iou == 1.0] = -1
+        ir_iou = 1 - _nn_iou_distance(np.array([ir_bbox]), np.array(all_ir_bboxes))
+        ir_iou[ir_iou == 1.0] = -1
+        if vi_iou != [[]]:
+            all_iou.append(max(vi_iou))
+        else:
+            all_iou.append(-1)
+        if ir_iou != [[]]:
+            all_iou.append(max(ir_iou))
+        else:
+            all_iou.append(-1)
+        return max(max(all_iou), 0)
+
+    def delete_bad_track_pairs(self, feat='pos-time'):
         # 遍历所有已匹配轨迹。满足一定标准，删除轨迹匹配关系
         # 该函数仅基于视觉特征实现。
-        for t_pairs in self.paired_crossmodel_ids:
+        paired_crossmodel_ids = copy.deepcopy(self.paired_crossmodel_ids)
+        for t_pairs_ in paired_crossmodel_ids:
+            t_pairs = copy.deepcopy(t_pairs_)
+            vi_feat = copy.deepcopy(self.find_visible_track(t_pairs[0]).to_xywh())
+            ir_feat = self.find_infrared_track(t_pairs[1]).to_xywh()
+            bias = self.best_bias()
+            vi_feat[0] = vi_feat[0] * bias[2] + bias[0]
+            vi_feat[1] = vi_feat[1] * bias[3] + bias[1]
+            vi_feat[2] = vi_feat[2] * bias[2]
+            vi_feat[3] = vi_feat[3] * bias[3]
+            source_xyxy = np.hstack((vi_feat[:2] - vi_feat[2:] / 2, vi_feat[:2] + vi_feat[2:] / 2))
+            target_xyxy = np.hstack((ir_feat[:2] - ir_feat[2:] / 2, ir_feat[:2] + ir_feat[2:] / 2))
+            boxes1 = torch.tensor([source_xyxy], dtype=torch.float)
+            boxes2 = torch.tensor([target_xyxy], dtype=torch.float)
+            distances = 1 - box_iou(boxes1, boxes2).numpy()  # smaller better
+            fix = self.delete_time_adjust_iou(t_pairs)
             if feat == 'pos':
-                vi_feat = copy.deepcopy(self.find_visible_track(t_pairs[0]).to_xywh())
-                ir_feat = self.find_infrared_track(t_pairs[1]).to_xywh()
-                bias = self.best_bias()
-                vi_feat[0] = vi_feat[0] * bias[2] + bias[0]
-                vi_feat[1] = vi_feat[1] * bias[3] + bias[1]
-                vi_feat[2] = vi_feat[2] * bias[2]
-                vi_feat[3] = vi_feat[3] * bias[3]
-                source_xyxy = np.hstack((vi_feat[:2] - vi_feat[2:] / 2, vi_feat[:2] + vi_feat[2:] / 2))
-                target_xyxy = np.hstack((ir_feat[:2] - ir_feat[2:] / 2, ir_feat[:2] + ir_feat[2:] / 2))
-                boxes1 = torch.tensor([source_xyxy], dtype=torch.float)
-                boxes2 = torch.tensor([target_xyxy], dtype=torch.float)
-                distances = 1 - box_iou(boxes1, boxes2).numpy()  # smaller better
-                if distances > 0.75:  # self.pos_track_dist+0.2:
-                    print(t_pairs, distances, "delete pairs!")
+                if distances > self.pair_delete_pos_thres:  # self.pos_track_dist+0.2:
+                    # print(t_pairs, distances, "delete pairs!")
                     self.paired_crossmodel_ids.remove(t_pairs)
                     self.single_visible_ids.append(t_pairs[0])
                     self.single_infrared_ids.append(t_pairs[1])
+            elif feat == 'pos-time':
+                vi_time_since_update = self.find_visible_track(t_pairs[0]).pair_time_since_update
+                ir_time_since_update = self.find_infrared_track(t_pairs[1]).pair_time_since_update
+                fixed_time_thres = max(self.pair_delete_time_thres-fix*40, 5)
+                print('fixed_thres:', fixed_time_thres)
+                if vi_time_since_update+ir_time_since_update > fixed_time_thres:
+                    self.find_visible_track(t_pairs[0]).time_since_update += 1
+                    self.find_infrared_track(t_pairs[1]).time_since_update += 1
+
+                if distances > self.pair_delete_pos_thres \
+                        or ir_time_since_update+vi_time_since_update > fixed_time_thres:
+                    self.paired_crossmodel_ids.remove(t_pairs)
+                    self.single_visible_ids.append(t_pairs[0])
+                    self.single_infrared_ids.append(t_pairs[1])
+                # if self.frame_num >= 177:
+                #     # print('pair', t_pairs[1], ir_time_since_update, self.find_infrared_track(t_pairs[1]).time_since_update)
+                #     print('7', self.infrared_tracks[1].pair_time_since_update, self.infrared_tracks[1].time_since_update)
+
+            elif feat=='pos_deep_time':
+                vi_time_since_update = self.find_visible_track(t_pairs[0]).pair_time_since_update
+                ir_time_since_update = self.find_infrared_track(t_pairs[1]).pair_time_since_update
+                f_vi = self.find_visible_track(t_pairs[0]).share_modality_features[-1]
+                f_ir = self.find_infrared_track(t_pairs[1]).share_modality_features[-1]
+                deep_dist = 1.0 - np.dot(f_vi, f_ir.T)
+
+                if vi_time_since_update > self.pair_delete_time_thres:
+                    self.find_visible_track(t_pairs[0]).time_since_update += 1
+                if ir_time_since_update > self.pair_delete_time_thres:
+                    self.find_infrared_track(t_pairs[1]).time_since_update += 1
+
+                if distances > self.pair_delete_pos_thres \
+                        or ir_time_since_update > self.pair_delete_time_thres \
+                        or vi_time_since_update > self.pair_delete_time_thres \
+                        or deep_dist > self.pair_delete_deep_thres:
+                    # print(t_pairs, distances, "delete pairs!")
+                    self.paired_crossmodel_ids.remove(t_pairs)
+                    self.single_visible_ids.append(t_pairs[0])
+                    self.single_infrared_ids.append(t_pairs[1])
+        # print('finish pairs delete', self.paired_crossmodel_ids)
+
+    def soft_nms(self):
+        def iou(bbox1,bbox2):
+            source_xyxy = np.hstack((bbox1[:2] - bbox1[2:] / 2, bbox1[:2] + bbox1[2:] / 2))
+            target_xyxy = np.hstack((bbox2[:2] - bbox2[2:] / 2, bbox2[:2] + bbox2[2:] / 2))
+            boxes1 = torch.tensor([source_xyxy], dtype=torch.float)
+            boxes2 = torch.tensor([target_xyxy], dtype=torch.float)
+            return box_iou(boxes1, boxes2).numpy()
+        def nms(t1, t2, paired_ids):
+            # step2: paired time: newer updated. Believe track that fresher.
+            if t1.pair_time_since_update > t2.pair_time_since_update:
+                t1.time_since_update += 1
+                return
+            elif t1.pair_time_since_update < t2.pair_time_since_update:
+                t2.time_since_update += 1
+                return
+            # # step3: hit more
+            if t1.hits > t2.hits:
+                t2.time_since_update += 1
+                return
+            elif t2.hits > t1.hits:
+                t1.time_since_update += 1
+                return
+            # step4: score:remain higher
+            if t1.conf_ema > t2.conf_ema:
+                t1.time_since_update += 1
+                return
+            else:
+                t2.time_since_update += 1
+                return
+
+        all_visible_tracks = [t for t in self.visible_tracks if t.is_confirmed() and t.time_since_update<1]
+        all_infrared_tracks = [t for t in self.infrared_tracks if t.is_confirmed() and t.time_since_update<1]
+        paired_visible_ids = [t[0] for t in self.paired_crossmodel_ids]
+        paired_infrared_ids = [t[1] for t in self.paired_crossmodel_ids]
+
+        for i, t1 in enumerate(all_visible_tracks):
+            for j, t2 in enumerate(all_visible_tracks[i+1:]):
+                t_iou = iou(t1.to_xywh(), t2.to_xywh())
+                if t_iou > self.soft_nms_thres:
+                    nms(t1, t2, paired_visible_ids)
+
+        for i, t1 in enumerate(all_infrared_tracks):
+            for j, t2 in enumerate(all_infrared_tracks[i+1:]):
+                t_iou = iou(t1.to_xywh(), t2.to_xywh())
+                if t_iou > self.soft_nms_thres:# execute nms:
+                    nms(t1, t2, paired_infrared_ids)
+        return
 
     def track_feature_distance(self, visible_feats, infrared_feats, metric_funcion):
         cost_matrix = np.zeros((len(visible_feats), len(infrared_feats)))
@@ -564,32 +748,35 @@ class Tracker:
         self._update_fkf(visible_track_, infrared_track_, FKFMode.both)
 
         # 更新指数移动平均：视觉特征、其他轨迹信息
-        visible_track_.hits += 1
         visible_track_.time_since_update = 0
+        visible_track_.pair_time_since_update = 0
         if visible_track_.state == TrackState.Tentative and visible_track_.hits >= visible_track_._n_init:
             visible_track_.state = TrackState.Confirmed
 
         # infrared features smooth update
-        infrared_track_.hits += 1
         infrared_track_.time_since_update = 0
+        infrared_track_.pair_time_since_update = 0
         if infrared_track_.state == TrackState.Tentative and infrared_track_.hits >= infrared_track_._n_init:
             infrared_track_.state = TrackState.Confirmed
 
     def update_fkf_miss2(self, visible_track_, infrared_track_):
+        visible_track_.pair_time_since_update += 1
+        infrared_track_.pair_time_since_update += 1
         self._update_fkf(visible_track_, infrared_track_, FKFMode.miss2)
+
 
     def update_fkf_miss_visible(self, visible_track_, infrared_track_, infrared_det):
         # infrared_track_.conf = infrared_det.conf
         self._update_fkf(visible_track_, infrared_track_, FKFMode.miss_vi)
         # 更新指数移动平均：视觉特征、其他轨迹信息
-        visible_track_.hits += 1
-        visible_track_.time_since_update = 0  # 没对应检测，结果不输出
+        visible_track_.time_since_update = 0
+        visible_track_.pair_time_since_update += 1
         if visible_track_.state == TrackState.Tentative and visible_track_.hits >= visible_track_._n_init:
             visible_track_.state = TrackState.Confirmed
 
         # infrared features smooth update
-        infrared_track_.hits += 1
         infrared_track_.time_since_update = 0
+        infrared_track_.pair_time_since_update = 0
         if infrared_track_.state == TrackState.Tentative and infrared_track_.hits >= infrared_track_._n_init:
             infrared_track_.state = TrackState.Confirmed
 
@@ -597,14 +784,14 @@ class Tracker:
         # visible_track_.conf = visible_det.conf
         self._update_fkf(visible_track_, infrared_track_, FKFMode.miss_ir)
         # 更新指数移动平均：视觉特征、其他轨迹信息
-        visible_track_.hits += 1
         visible_track_.time_since_update = 0
+        visible_track_.pair_time_since_update = 0
         if visible_track_.state == TrackState.Tentative and visible_track_.hits >= visible_track_._n_init:
             visible_track_.state = TrackState.Confirmed
 
         # infrared features smooth update
-        infrared_track_.hits += 1
-        infrared_track_.time_since_update = 0  # 没对应检测，结果不输出
+        infrared_track_.time_since_update = 0
+        infrared_track_.pair_time_since_update += 1
         if infrared_track_.state == TrackState.Tentative and infrared_track_.hits >= infrared_track_._n_init:
             infrared_track_.state = TrackState.Confirmed
 
@@ -613,29 +800,29 @@ class Tracker:
         # 1、取vel，加权平均得到融合速度；
         # 2、利用速度更新子滤波器状态；
         # 3、计算、分配子滤波器协方差；
-        v_conf = visible_track_.conf
+        v_conf = copy.deepcopy(visible_track_.conf_ema)
         v_match_mean, v_match_covariance = copy.deepcopy(visible_track_.match_mean), copy.deepcopy(
             visible_track_.match_covariance)
         v_vel_mean = v_match_mean[4:8]
-        v_vel_cov = v_match_covariance[4:, 4:]
+        # v_vel_cov = v_match_covariance[4:, 4:]
 
-        i_conf = infrared_track_.conf
+        i_conf = copy.deepcopy(infrared_track_.conf_ema)
         i_match_mean, i_match_covariance = copy.deepcopy(infrared_track_.match_mean), copy.deepcopy(
             infrared_track_.match_covariance)
         i_vel_mean = i_match_mean[4:]
-        i_vel_cov = i_match_covariance[4:, 4:]
+        # i_vel_cov = i_match_covariance[4:, 4:]
 
         if mode == FKFMode.both:
-            v_conf, i_conf = v_conf**3, i_conf**3
+            v_conf_, i_conf_ = v_conf**10, i_conf**10
         elif mode == FKFMode.miss_vi:
-            v_conf, i_conf = 0, i_conf
+            v_conf_, i_conf_ = 0, i_conf
         elif mode == FKFMode.miss_ir:
-            v_conf, i_conf = v_conf, 0
+            v_conf_, i_conf_ = v_conf, 0
         elif mode == FKFMode.miss2:
-            v_conf, i_conf = v_conf, i_conf
+            v_conf_, i_conf_ = v_conf, i_conf
 
         # 按照匹配度，融合子滤波器均值并更新。匹配度构成：级联匹配处的特征相似度
-        fkf_vel = (i_conf * i_vel_mean + v_conf * v_vel_mean) / (i_conf + v_conf)
+        fkf_vel = (i_conf_ * i_vel_mean + v_conf_ * v_vel_mean) / (i_conf_ + v_conf_)
         visible_track_.mean[0:4] = visible_track_.mean[0:4] + fkf_vel * self.dt
         visible_track_.mean[4:] = fkf_vel
         infrared_track_.mean[0:4] = infrared_track_.mean[0:4] + fkf_vel * self.dt
@@ -650,10 +837,19 @@ class Tracker:
         # visible_track_.match_covariance[4:, 4:] = v_vel_cov
         # infrared_track_.match_covariance[4:, 4:] = i_vel_cov
 
-        # 联邦滤波器协方差融合、子滤波器分配。分配全部协方差，不仅仅为共享空间
+        # 联邦滤波器协方差融合、子滤波器分配。
         fkf_cov = v_match_covariance + i_match_covariance
-        v_vel_cov = fkf_cov * (v_conf / (i_conf + v_conf))
-        i_vel_cov = fkf_cov * (i_conf / (i_conf + v_conf))
+        v_vel_cov = fkf_cov * (i_conf / (i_conf + v_conf))
+        i_vel_cov = fkf_cov * (v_conf / (i_conf + v_conf))
+        # visible_track_.match_covariance = v_vel_cov
+        # infrared_track_.match_covariance = i_vel_cov
+
+        # fkf_cov = (i_conf + v_conf) * (v_match_covariance @ i_match_covariance) \
+        #           @ np.linalg.inv(v_conf * i_match_covariance + i_conf*v_match_covariance)
+        # fkf_cov = (v_conf * np.linalg.inv(v_match_covariance) + i_conf * np.linalg.inv(i_match_covariance)) / (i_conf + v_conf)
+        # fkf_cov = np.linalg.inv(fkf_cov)
+        # v_vel_cov = fkf_cov * (i_conf + v_conf) / v_conf
+        # i_vel_cov = fkf_cov * (i_conf + v_conf) / i_conf
         visible_track_.match_covariance = v_vel_cov
         infrared_track_.match_covariance = i_vel_cov
         return
@@ -714,7 +910,11 @@ class Tracker:
         else:
             points = np.array([t[0] for t in self.paired_bias_set])
             score = np.array([t[1] for t in self.paired_bias_set])
-            return points[np.argmin(score)]
+            return points[np.argmax(score)]
+
+    def bias_score_ema(self):
+        for t in self.paired_bias_set:
+            t[1] = t[1]*self.bias_ema_alpha
 
     def find_visible_track(self, id):
         for t in self.visible_tracks:
@@ -954,7 +1154,7 @@ class Tracker:
                                           [0, scale_y, translation[1]],
                                           [0, 0, 1]])
 
-        return transformation_matrix, score
+        return pos, cost
 
         # 确定配对点、未匹配点
         paired_indices = []
@@ -973,7 +1173,7 @@ class Tracker:
 
         # return paired_indices, source_unmatched, target_unmatched, translation
 
-        return translation, score
+        return pos, cost
 
     def ps_bbox_translation(self, source_, target_, max_iterations=150, partical_num=40):
         """
@@ -1049,10 +1249,41 @@ class Tracker:
         # # plot_contour(pos_history)
         # plt.show()
 
-        dist, paired_num_ = paired_num(pos, source, target_)
-        self.paired_bias_set.append((pos, paired_num_))
+        # dist, paired_num_ = paired_num(pos, source, target_)  # 修改
+        self.paired_bias_set.append([pos, 1-cost])  # 修改
 
         return pos, cost
+
+    def save_args(self):
+        args_={
+            'max_iou_dist':self.max_iou_dist,
+            'max_age':self.max_age,
+            'n_init':self.n_init,
+            '_lambda':self._lambda,
+            'ema_alpha' :self.ema_alpha,
+            'conf_ema_alpha':self.conf_ema_alpha,
+            'bias_ema_alpha':self.bias_ema_alpha,
+            'mc_lambda':self.mc_lambda,
+            'deep_track_dist':self.deep_track_dist,
+            'pos_track_dist':self.pos_track_dist,
+            'pair_delete_pos_thres':self.pair_delete_pos_thres,
+            'pair_delete_time_thres':self.pair_delete_time_thres,
+            'pair_delete_deep_thres':self.pair_delete_deep_thres,
+            'soft_nms_thres':self.soft_nms_thres
+        }
+        import csv
+        import os
+        keys = args_.keys()  # 获取字典中的键
+
+        filename = '../output_tracks/'+self.exp_id+'/args_info.csv'
+        if not os.path.exists(os.path.dirname(filename)):
+            os.makedirs(os.path.dirname(filename))
+        if not os.path.exists(filename):
+            with open(filename, 'w', newline='') as file:
+                print(args_)
+                writer = csv.DictWriter(file, fieldnames=keys)
+                writer.writeheader()  # 写入标题行
+                writer.writerows([args_])  # 写入数据行
 
 
 def _softmax_1000(x):

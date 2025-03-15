@@ -78,17 +78,21 @@ class Track:
         n_init,
         max_age,
         ema_alpha,
+        conf_ema_alpha
     ):
         self.id = id
         self.modality = modality
         self.bbox = detection.to_xyah()
         self.conf = detection.conf
+        self.conf_ema = detection.conf
         self.cls = detection.cls
         self.det_ind = detection.det_ind
         self.hits = 1
         self.age = 1
         self.time_since_update = 0
+        self.pair_time_since_update = 0
         self.ema_alpha = ema_alpha
+        self.conf_ema_alpha = conf_ema_alpha
 
         # start with confirmed in Ci as test expect equal amount of outputs as inputs
         self.state = TrackState.Confirmed if (os.getenv('GITHUB_ACTIONS') == 'true' and os.getenv('GITHUB_JOB') != 'mot-metrics-benchmark') else TrackState.Tentative
@@ -177,6 +181,7 @@ class Track:
         """
         self.bbox = detection.to_xyah()
         self.conf = detection.conf
+        self.conf_ema = self.conf_ema*self.conf_ema_alpha + detection.conf*(1-self.conf_ema_alpha)
         self.cls = detection.cls
         self.det_ind = detection.det_ind
         self.mean, self.covariance = self.kf.update(

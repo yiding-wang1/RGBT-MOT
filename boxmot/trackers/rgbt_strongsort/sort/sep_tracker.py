@@ -72,7 +72,8 @@ class SeperateTracker:
             ema_alpha=0.9,
             mc_lambda=0.995,
             deep_track_dist=0.5,
-            pos_track_dist=0.7
+            pos_track_dist=0.7,
+            conf_ema_alpha=0.5
     ):
         self.metric = metric
         self.max_iou_dist = max_iou_dist
@@ -83,6 +84,7 @@ class SeperateTracker:
         self.mc_lambda = mc_lambda
         self.deep_track_dist = deep_track_dist
         self.pos_track_dist = pos_track_dist
+        self.conf_ema_alpha = conf_ema_alpha
 
         self.visible_tracks = []
         self.infrared_tracks = []
@@ -268,6 +270,7 @@ class SeperateTracker:
                     self.n_init,
                     self.max_age,
                     self.ema_alpha,
+                    self.conf_ema_alpha
                 )
             )
             self._next_id += 1
@@ -280,6 +283,7 @@ class SeperateTracker:
                     self.n_init,
                     self.max_age,
                     self.ema_alpha,
+                    self.conf_ema_alpha
                 )
             )
             self._next_id += 1
