@@ -66,12 +66,10 @@ class RGBT_StrongSort(object):
             weights=reid_weights, device=device, half=half
         ).model
 
-
+        # max_cos_dist = 0.2
         max_age = 20
         max_iou_dist = 0.9
-        self.exp_id = '314_3'
-
-
+        self.exp_id = '316_2'
         # whether track different model seperately
         self.seperate_track = False
         if self.seperate_track:
