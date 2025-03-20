@@ -66,10 +66,11 @@ class RGBT_StrongSort(object):
             weights=reid_weights, device=device, half=half
         ).model
 
-        # max_cos_dist = 0.2
+        max_cos_dist = 0.2
         max_age = 20
-        max_iou_dist = 0.9
-        self.exp_id = '316_2'
+        max_iou_dist = 0.8  # ！！！！！！！！！！！！！！！！！
+        self.exp_id = '320_1'
+
         # whether track different model seperately
         self.seperate_track = False
         if self.seperate_track:
@@ -273,9 +274,9 @@ class RGBT_StrongSort(object):
             save_both_results(self.frame_num, save_path=self.output_path,
                               visible_outputs=visible_outputs, infrared_outputs=infrared_outputs,
                               paired_tracks=paired_tracks, separate_tracking=self.seperate_track)
-            show_both_result(visible_outputs, infrared_outputs,
-                             copy.deepcopy(visible_img), copy.deepcopy(infrared_img),
-                             self.frame_num, self.subset)
+            # show_both_result(visible_outputs, infrared_outputs,
+            #                  copy.deepcopy(visible_img), copy.deepcopy(infrared_img),
+            #                  self.frame_num, self.subset)
         return np.array([])
 
     def get_modality_features_deen_vi(self, modality_xyxys, modality_img):
