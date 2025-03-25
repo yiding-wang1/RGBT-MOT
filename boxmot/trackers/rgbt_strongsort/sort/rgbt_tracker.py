@@ -73,25 +73,25 @@ class Tracker:
             self,
             metric,
             max_iou_dist=0.9,
-            max_age=10,
+            max_age=30,
             n_init=3,
             _lambda=0,
             ema_alpha=0.9,
             conf_ema_alpha=0.1,
-            bias_ema_alpha=0.95,
+            bias_ema_alpha=1,
             mc_lambda=0.995,
-            deep_track_dist=0.35,
-            pos_track_dist=0.5,
-            pair_delete_pos_thres=0.65,
-            pair_delete_time_thres_max=20,
+            deep_track_dist=0.45,
+            pos_track_dist=0.4,
+            pair_delete_pos_thres=0.5,
+            pair_delete_time_thres_max=30,
             pair_delete_time_thres_min=10,
             pair_delete_deep_thres=0.55,
             soft_nms_thres=0.8,
             exp_id='',
-            adaptive_pose_thres=False,  # [0.5, 0.35, 0.25, 0.575], [1,0.2,0.5,0.45]
+            adaptive_pose_thres=True,  # [1, 0.1, 1, 0.2]
     ):
         if adaptive_pose_thres:
-            adaptive_pose_thres = [1, 0.2, 0.5, 0.45]
+            adaptive_pose_thres = [1, 0.1, 1, 0.3]
         self.metric = metric
         self.max_iou_dist = max_iou_dist
         self.max_age = max_age
@@ -135,7 +135,6 @@ class Tracker:
 
     def predict(self):
         """Propagate track state distributions one time step forward.
-
         This function should be called once every time step, before `update`.
         """
         for track in self.visible_tracks:
@@ -163,9 +162,9 @@ class Tracker:
         self.frame_num = frame_num
 
         # Run matching cascade.  # 对可见光、红外分别进行轨迹与检测目标的级联匹配
-        visible_matches, visible_unmatched_tracks, visible_unmatched_detections = self._match(visible_detections,
+        visible_matches, visible_unmatched_tracks, visible_unmatched_detections = self._match_v1(visible_detections,
                                                                                               'visible')
-        infrared_matches, infrared_unmatched_tracks, infrared_unmatched_detections = self._match(infrared_detections,
+        infrared_matches, infrared_unmatched_tracks, infrared_unmatched_detections = self._match_v1(infrared_detections,
                                                                                                  'infrared')
 
         # Update track set.
@@ -258,7 +257,6 @@ class Tracker:
                         # infrared_track_ = self.infrared_tracks[t[0]]
                         infrared_det_ = infrared_detections[t[1]]
                         break
-                # print(visible_track_idx, infrared_track_idx)
 
                 self.update_fkf(
                     visible_track_,
@@ -331,11 +329,11 @@ class Tracker:
             confirmed_tracks = [i for i, t in enumerate(self.visible_tracks) if t.is_confirmed()]
             unconfirmed_tracks = [i for i, t in enumerate(self.visible_tracks) if not t.is_confirmed()]
 
-            # confirmed_paired_tracks = [i for i, t in enumerate(self.visible_tracks) if t.is_confirmed()and t.id not in self.single_visible_ids]
-            # confirmed_single_tracks = [i for i, t in enumerate(self.visible_tracks) if t.is_confirmed()and t.id in self.single_visible_ids]
+            confirmed_paired_tracks = [i for i, t in enumerate(self.visible_tracks) if t.is_confirmed()and t.id not in self.single_visible_ids]
+            confirmed_single_tracks = [i for i, t in enumerate(self.visible_tracks) if t.is_confirmed()and t.id in self.single_visible_ids]
             #
             # # Associate confirmed tracks using appearance features.  第一级匹配，使用外观特征
-            # matches_a_, unmatched_tracks_a_, unmatched_detections = linear_assignment.matching_cascade(
+            # matches_a_, unmatched_tracks_a_, unmatched_detections_ = linear_assignment.matching_cascade(
             #     gated_metric,
             #     self.metric.matching_threshold,
             #     self.max_age,
@@ -343,7 +341,7 @@ class Tracker:
             #     detections,
             #     confirmed_paired_tracks,
             # )
-            #
+            # #
             # unmatched_tracks_a = unmatched_tracks_a_ + confirmed_single_tracks
 
             matches_a, unmatched_tracks_a, unmatched_detections = linear_assignment.matching_cascade(
@@ -353,6 +351,8 @@ class Tracker:
                 self.visible_tracks,
                 detections,
                 confirmed_tracks,
+                # unmatched_tracks_a,
+                # unmatched_detections_
             )
 
             # Associate remaining tracks together with unconfirmed tracks using IOU.  第二级匹配，使用交并比
@@ -373,7 +373,7 @@ class Tracker:
                 unmatched_detections,
             )
 
-            matches = matches_a + matches_b
+            matches = matches_a + matches_b# + matches_a_
             unmatched_tracks = list(set(unmatched_tracks_a + unmatched_tracks_b))
             return matches, unmatched_tracks, unmatched_detections
 
@@ -389,14 +389,13 @@ class Tracker:
             #                            t.is_confirmed() and t.id in self.single_infrared_ids]
             #
             # # Associate confirmed tracks using appearance features.  第一级匹配，使用外观特征
-            # matches_a_, unmatched_tracks_a_, unmatched_detections = linear_assignment.matching_cascade(
+            # matches_a_, unmatched_tracks_a_, unmatched_detections_ = linear_assignment.matching_cascade(
             #     gated_metric,
             #     self.metric.matching_threshold,
             #     self.max_age,
             #     self.infrared_tracks,
             #     detections,
             #     confirmed_paired_tracks,
-            #
             # )
             # unmatched_tracks_a = unmatched_tracks_a_ + confirmed_single_tracks
             matches_a, unmatched_tracks_a, unmatched_detections = linear_assignment.matching_cascade(
@@ -406,8 +405,9 @@ class Tracker:
                 self.infrared_tracks,
                 detections,
                 confirmed_tracks,
+                # unmatched_tracks_a,
+                # unmatched_detections_
             )
-
             # Associate remaining tracks together with unconfirmed tracks using IOU.  第二级匹配，使用交并比
             # 备选tracks：unconfirm（检测过少，未形成）+第一轮unmatch中上一frame更新仅一轮的轨迹
             iou_track_candidates = unconfirmed_tracks + [
@@ -426,7 +426,137 @@ class Tracker:
                 unmatched_detections,
             )
 
-            matches = matches_a + matches_b
+            matches = matches_a + matches_b# + matches_a_
+            unmatched_tracks = list(set(unmatched_tracks_a + unmatched_tracks_b))
+            return matches, unmatched_tracks, unmatched_detections
+
+    def _match_v1(self, detections, modality):
+        def gated_metric(tracks, dets, track_indices, detection_indices):
+            features = np.array([dets[i].feat for i in detection_indices])  # feat:det.feat
+            targets = np.array([tracks[i].id for i in track_indices])  # targets:track.id
+            cost_matrix = self.metric.distance(features, targets)
+            cost_matrix = linear_assignment.gate_cost_matrix(
+                cost_matrix,
+                tracks,
+                dets,
+                track_indices,
+                detection_indices,
+                self.mc_lambda,
+            )
+
+            return cost_matrix
+
+        if modality == 'visible':
+            # Split track set into confirmed and unconfirmed tracks.
+            confirmed_tracks = [i for i, t in enumerate(self.visible_tracks) if t.is_confirmed()]
+            unconfirmed_tracks = [i for i, t in enumerate(self.visible_tracks) if not t.is_confirmed()]
+
+            confirmed_paired_tracks = [i for i, t in enumerate(self.visible_tracks) if
+                                       t.is_confirmed()
+                                       and t.id not in self.single_visible_ids]
+                                       # and t.pair_time_since_update <= 2]
+            confirmed_single_tracks = [i for i, t in enumerate(self.visible_tracks) if
+                                       t.is_confirmed() and
+                                       t.id in self.single_visible_ids]
+                                       # or t.pair_time_since_update > 2)]
+            #
+            # # Associate confirmed tracks using appearance features.  第一级匹配，使用外观特征
+            matches_a_, unmatched_tracks_a_, unmatched_detections_ = linear_assignment.matching_cascade(
+                gated_metric,
+                self.metric.matching_threshold+0.02,
+                self.max_age,
+                self.visible_tracks,
+                detections,
+                confirmed_paired_tracks,
+            )
+            #
+            unmatched_tracks_a = unmatched_tracks_a_ + confirmed_single_tracks
+
+            matches_a, unmatched_tracks_a, unmatched_detections = linear_assignment.matching_cascade(
+                gated_metric,
+                self.metric.matching_threshold,
+                self.max_age,
+                self.visible_tracks,
+                detections,
+                unmatched_tracks_a,
+                unmatched_detections_
+            )
+
+            # Associate remaining tracks together with unconfirmed tracks using IOU.  第二级匹配，使用交并比
+            # 备选tracks：unconfirm（检测过少，未形成）+第一轮unmatch中上一frame更新仅一轮的轨迹
+            iou_track_candidates = unconfirmed_tracks + [
+                k for k in unmatched_tracks_a if self.visible_tracks[k].time_since_update == 1
+            ]  # 确定无缘的轨迹：第一轮unmatch且之前frame已经unmatch的轨迹
+            unmatched_tracks_a = [
+                k for k in unmatched_tracks_a if self.visible_tracks[k].time_since_update != 1
+            ]
+
+            matches_b, unmatched_tracks_b, unmatched_detections = linear_assignment.min_cost_matching(
+                iou_matching.iou_cost,
+                self.max_iou_dist,
+                self.visible_tracks,
+                detections,
+                iou_track_candidates,
+                unmatched_detections,
+            )
+
+            matches = matches_a + matches_b + matches_a_
+            unmatched_tracks = list(set(unmatched_tracks_a + unmatched_tracks_b))
+            return matches, unmatched_tracks, unmatched_detections
+
+        elif modality == 'infrared':
+            # Split track set into confirmed and unconfirmed tracks.
+            confirmed_tracks = [i for i, t in enumerate(self.infrared_tracks) if t.is_confirmed()]
+            unconfirmed_tracks = [i for i, t in enumerate(self.infrared_tracks) if not t.is_confirmed()]
+
+            # Associate confirmed tracks using appearance features.  第一级匹配，使用外观特征
+            confirmed_paired_tracks = [i for i, t in enumerate(self.infrared_tracks) if
+                                       t.is_confirmed()
+                                       and t.id not in self.single_infrared_ids]
+                                       # and t.pair_time_since_update <= 2]
+            confirmed_single_tracks = [i for i, t in enumerate(self.infrared_tracks) if
+                                       t.is_confirmed() and
+                                       t.id in self.single_infrared_ids]
+                                        # or t.pair_time_since_update > 2)]
+
+            # Associate confirmed tracks using appearance features.  第一级匹配，使用外观特征
+            matches_a_, unmatched_tracks_a_, unmatched_detections_ = linear_assignment.matching_cascade(
+                gated_metric,
+                self.metric.matching_threshold+0.02,
+                self.max_age,
+                self.infrared_tracks,
+                detections,
+                confirmed_paired_tracks,
+            )
+            unmatched_tracks_a = unmatched_tracks_a_ + confirmed_single_tracks
+            matches_a, unmatched_tracks_a, unmatched_detections = linear_assignment.matching_cascade(
+                gated_metric,
+                self.metric.matching_threshold,
+                self.max_age,
+                self.infrared_tracks,
+                detections,
+                unmatched_tracks_a,
+                unmatched_detections_
+            )
+            # Associate remaining tracks together with unconfirmed tracks using IOU.  第二级匹配，使用交并比
+            # 备选tracks：unconfirm（检测过少，未形成）+第一轮unmatch中上一frame更新仅一轮的轨迹
+            iou_track_candidates = unconfirmed_tracks + [
+                k for k in unmatched_tracks_a if self.infrared_tracks[k].time_since_update == 1
+            ]  # 确定无缘的轨迹：第一轮unmatch且之前frame已经unmatch的轨迹
+            unmatched_tracks_a = [
+                k for k in unmatched_tracks_a if self.infrared_tracks[k].time_since_update != 1
+            ]
+
+            matches_b, unmatched_tracks_b, unmatched_detections = linear_assignment.min_cost_matching(
+                iou_matching.iou_cost,
+                self.max_iou_dist,
+                self.infrared_tracks,
+                detections,
+                iou_track_candidates,
+                unmatched_detections,
+            )
+
+            matches = matches_a + matches_b + matches_a_
             unmatched_tracks = list(set(unmatched_tracks_a + unmatched_tracks_b))
             return matches, unmatched_tracks, unmatched_detections
 
@@ -486,10 +616,6 @@ class Tracker:
         matched_track_pairs_b, _, _ = self._crossmodality_match(
             all_visible_tracks,
             all_infrared_tracks,
-            # unmatched_visible_tracks_a,
-            # unmatched_infrared_tracks_a,
-            # confirmed_visible_tracks,
-            # confirmed_infrared_tracks,
             _nn_iou_distance,
             self.pos_track_dist,
             all_visible_tracks,
@@ -513,15 +639,25 @@ class Tracker:
         ir_in_matches = [t[1] for t in matches]
         p_ids = copy.deepcopy(self.paired_crossmodel_ids)
         remove_pairs = []
+        # for m in matches:
+        #     if m[0] in [p[0] for p in self.paired_crossmodel_ids]:
+        #         remove_pairs.append(p_ids[[p[0] for p in self.paired_crossmodel_ids].index(m[0])])
+        #         continue
+        #     elif m[1] in [p[1] for p in self.paired_crossmodel_ids]:
+        #         remove_pairs.append(p_ids[[p[1] for p in self.paired_crossmodel_ids].index(m[1])])
+
+        # for m in remove_pairs:
+            # self.paired_crossmodel_ids.remove(m)
+
         for m in p_ids:
             if m[0] in vi_in_matches:
                 remove_pairs.append(matches[vi_in_matches.index(m[0])])
                 continue
             elif m[1] in ir_in_matches:
                 remove_pairs.append(matches[ir_in_matches.index(m[1])])
+
         remove_pairs = list(set(remove_pairs))
-        #
-        deleted = []
+        # deleted = []
         for m in remove_pairs:
             matches.remove(m)
             # if m in deleted:
@@ -592,7 +728,6 @@ class Tracker:
                 self.single_visible_ids.remove(i[0])
             if i[1] in self.single_infrared_ids:
                 self.single_infrared_ids.remove(i[1])
-
         return
 
     def _crossmodality_match(self, visible_id, infrared_id, metric_function, distance_thres, all_visible_id=None,
@@ -624,12 +759,14 @@ class Tracker:
 
         if feat == 'pos':  # adjust pos based on global bias/icp algorithm
             if np.mod(self.frame_num, 10) == 0 or self.paired_bias_set == []:
+                self.bias_score_ema()
                 pose, score = self.ps_bbox_translation(all_visible_features_, all_infrared_features)
                 if self.adaptive_pose_thres:
-                    self.pos_track_dist = score * self.adaptive_pose_thres[0] + self.adaptive_pose_thres[1]
-                    self.pair_delete_pos_thres = score * self.adaptive_pose_thres[2] + self.adaptive_pose_thres[3]
+                    self.pos_track_dist = max(score * self.adaptive_pose_thres[0] + self.adaptive_pose_thres[1],0.4)
+                    self.pair_delete_pos_thres = max(score * self.adaptive_pose_thres[2] + self.adaptive_pose_thres[3], 0.5)
             else:
                 pose = self.best_bias()
+
             visible_features_ = self.bias_adjust(visible_features_, pose)
 
         cost_matrix = self.track_feature_distance(visible_features_, infrared_features, metric_function)
@@ -778,12 +915,12 @@ class Tracker:
                 t2.time_since_update += 1
                 return
             # # step3: hit more
-            # if t1.hits > t2.hits:
-            #     t2.time_since_update += 1
-            #     return
-            # elif t2.hits > t1.hits:
-            #     t1.time_since_update += 1
-            #     return
+            if t1.hits > t2.hits:
+                t2.time_since_update += 1
+                return
+            elif t2.hits > t1.hits:
+                t1.time_since_update += 1
+                return
             # step4: score:remain higher
             if t1.conf_ema > t2.conf_ema:
                 t1.time_since_update += 1
@@ -1025,9 +1162,10 @@ class Tracker:
         t1_ = copy.deepcopy(t1)
         t2_ = copy.deepcopy(t2)
         t1 = t2_
-        t1.id = id1
+        t1.id, t1.time_since_update, t1.pair_time_since_update = id1, t1_.time_since_update, t1_.pair_time_since_update
         t2 = t1_
-        t2.id = id2
+        t2.id, t2.time_since_update, t2.pair_time_since_update = id2, t2_.time_since_update, t2_.pair_time_since_update
+
 
     def replace_infrared_tracks(self, id1, id2):
         t1 = self.find_infrared_track(id1)
@@ -1035,9 +1173,9 @@ class Tracker:
         t1_ = copy.deepcopy(t1)
         t2_ = copy.deepcopy(t2)
         t1 = t2_
-        t1.id = id1
+        t1.id, t1.time_since_update, t1.pair_time_since_update = id1, t1_.time_since_update, t1_.pair_time_since_update
         t2 = t1_
-        t2.id = id2
+        t2.id, t2.time_since_update, t2.pair_time_since_update = id2, t2_.time_since_update, t2_.pair_time_since_update
 
     def icp_2d_translation(self, source_, target_, max_iterations=100, tolerance=1e-6):
 

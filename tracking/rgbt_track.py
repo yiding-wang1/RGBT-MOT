@@ -197,7 +197,7 @@ def parse_opt():
     parser.add_argument('--tracking-method', type=str, default='rgbt_strongsort',
                         help='deepocsort, botsort, strongsort, ocsort, bytetrack, imprassoc')
     parser.add_argument('--source', type=str,
-                        default='E:/lasher/LasHeR_Unalined_960_0615/seleted/righthunchblack/visible/',
+                        default='E:/lasher/LasHeR_Unalined_960_0615/seleted/2ndboyfarintheforest2right/visible/',
                         help='file/dir/URL/glob, 0 for webcam')
     parser.add_argument('--dataset_source', type=str,
                         default='E:/lasher/LasHeR_Unalined_960_0615/seleted/',
@@ -298,10 +298,25 @@ if __name__ == "__main__":
         '2ndboyfarintheforest2right',
         'righthunchblack'
     ]
+    eval_hard_set_v1=[
+        'leftunderbasket',
+        'blueboywalking',
+        'blkcarfollowingwhite',
+        'boybackpack',
+        'e-tribike',
+        'manbikecoming',
+        'midof3girls',
+        '2ndboyfarintheforest2right',
+        'righthunchblack',
+        'runninggreenboyafterwhite',
+        'the2ndboyunderbasket',
+        # 'right2ndfarboytakinglight2left',
+    ]
+
     if opt.track_all:
         track_id = 0
         for path in os.scandir(opt.dataset_source):
-            if path.is_dir() and os.path.basename(path) in eval_hard_set:
+            if path.is_dir() and os.path.basename(path) in eval_hard_set_v1:
                 print(os.path.basename(path))
                 opt.track_id = os.path.abspath(path)
                 opt.source = os.path.join(path, 'visible')

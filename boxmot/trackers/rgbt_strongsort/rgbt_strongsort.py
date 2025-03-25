@@ -67,9 +67,9 @@ class RGBT_StrongSort(object):
         ).model
 
         max_cos_dist = 0.2
-        max_age = 20
-        max_iou_dist = 0.8  # ！！！！！！！！！！！！！！！！！
-        self.exp_id = '320_1'
+        max_age = 30
+        max_iou_dist = 0.9  # ！！！！！！！！！！！！！！！！！
+        self.exp_id = '325v1_1'
 
         # whether track different model seperately
         self.seperate_track = False
@@ -94,7 +94,7 @@ class RGBT_StrongSort(object):
             )
         self.cmc = get_cmc_method('ecc')()
         self.frame_num = 0
-        self.subset = 'righthunchblack'
+        self.subset = '2ndboyfarintheforest2right'
 
         if track_all:
             self.img_path = track_id
@@ -264,9 +264,9 @@ class RGBT_StrongSort(object):
 
         if self.visualize:
             show_both_result(visible_outputs, infrared_outputs, copy.deepcopy(visible_img), copy.deepcopy(infrared_img), self.frame_num, self.subset)
-            save_both_results(self.frame_num, save_path=self.output_path,
-                              visible_outputs=visible_outputs, infrared_outputs=infrared_outputs,
-                              paired_tracks=paired_tracks, separate_tracking=self.seperate_track)
+            # save_both_results(self.frame_num, save_path=self.output_path,
+            #                   visible_outputs=visible_outputs, infrared_outputs=infrared_outputs,
+            #                   paired_tracks=paired_tracks, separate_tracking=self.seperate_track)
             # show_both_det(visible_xyxy, infrared_xyxy,
             #               copy.deepcopy(visible_img), copy.deepcopy(infrared_img),
             #               self.frame_num, self.subset, visible_confs, infrared_confs)
@@ -473,7 +473,7 @@ def show_both_result(visible_outputs, infrared_outputs, visible_img, infrared_im
                 thickness
             )
     combined_img = cv2.hconcat([visible_img, infrared_img])
-    save_path = f"./output_imgs_313_5/{subset}/{frame_num}.jpg"
+    save_path = f"./output_imgs_324_v2/{subset}/{frame_num}.jpg"
     if not os.path.exists(os.path.dirname(save_path)):
         os.makedirs(os.path.dirname(save_path))
     cv2.imwrite(save_path, combined_img)
