@@ -251,6 +251,7 @@ class KalmanFilterXYSR(object):
             Get observation, use online smoothing to re-update parameters
             """
             self.unfreeze()
+
         self.observed = True
         
         if R is None:

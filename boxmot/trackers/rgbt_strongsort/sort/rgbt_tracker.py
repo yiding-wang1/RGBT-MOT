@@ -85,13 +85,14 @@ class Tracker:
             pair_delete_pos_thres=0.5,
             pair_delete_time_thres_max=30,
             pair_delete_time_thres_min=10,
-            pair_delete_deep_thres=0.55,
+            pair_delete_deep_thres=0.45,
             soft_nms_thres=0.8,
             exp_id='',
-            adaptive_pose_thres=True,  # [1, 0.1, 1, 0.2]
+            adaptive_pose_thres=True,  # [1, 0.1, 1, 0.3]
+            input_fusion=False
     ):
         if adaptive_pose_thres:
-            adaptive_pose_thres = [1, 0.1, 1, 0.3]
+            adaptive_pose_thres = [2., 0.1, 2.5, 0.1]
         self.metric = metric
         self.max_iou_dist = max_iou_dist
         self.max_age = max_age
@@ -129,6 +130,7 @@ class Tracker:
         self.deep_track_rate = 1.
 
         self.pose_only = True
+        self.input_fusion = input_fusion
         self.adaptive_pose_thres = adaptive_pose_thres
 
         self.save_args()
@@ -214,14 +216,15 @@ class Tracker:
                 self.infrared_tracks[track_idx].update_pos_and_state(infrared_detections[detection_idx])
 
         # 4.2 更新匹配成功的轨迹集合：跨模态轨迹对ids*1 运行update+partial_fit
+
+        visible_unmatched_tracks_idx = [t.id for i, t in enumerate(self.visible_tracks) if
+                                        i in visible_unmatched_tracks]
+        infrared_unmatched_tracks_idx = [t.id for i, t in enumerate(self.infrared_tracks) if
+                                         i in infrared_unmatched_tracks]
         for visible_track_idx, infrared_track_idx in self.paired_crossmodel_ids:  # 轨迹id，列表位置id
             # 无检测
             visible_track_ = self.find_visible_track(visible_track_idx)
             infrared_track_ = self.find_infrared_track(infrared_track_idx)
-            visible_unmatched_tracks_idx = [t.id for i, t in enumerate(self.visible_tracks) if
-                                            i in visible_unmatched_tracks]
-            infrared_unmatched_tracks_idx = [t.id for i, t in enumerate(self.infrared_tracks) if
-                                             i in infrared_unmatched_tracks]
 
             if (visible_track_idx in visible_unmatched_tracks_idx) and (
                     infrared_track_idx in infrared_unmatched_tracks_idx):
@@ -266,8 +269,8 @@ class Tracker:
                 )
                 # visible_track_.update_pos_and_state(visible_det_)
                 # infrared_track_.update_pos_and_state(infrared_det_)
-                visible_track_.update_pos_and_state([])
-                infrared_track_.update_pos_and_state([])
+            visible_track_.update_pos_and_state([])
+            infrared_track_.update_pos_and_state([])
 
         # self.delete_time_adjust()
         if self.pose_only:
@@ -299,12 +302,12 @@ class Tracker:
             f"visible_trackers:{active_visible_targets} infrared_trackers:{active_infrared_targets} \npairs:{self.paired_crossmodel_ids}")
         print(f'single_vi&ir:{self.single_visible_ids}', self.single_infrared_ids)
         print(
-            f'v-time-since-update{[f.time_since_update for f in self.visible_tracks if f.id in active_visible_targets]}')
+            f'v-    time-since-update{[f.time_since_update for f in self.visible_tracks if f.id in active_visible_targets]}')
         print(
             f'v-pair-time-since-update{[f.pair_time_since_update for f in self.visible_tracks if f.id in active_visible_targets]}')
 
         print(
-            f'i-time-since-update{[f.time_since_update for f in self.infrared_tracks if f.id in active_infrared_targets]}')
+            f'i-    time-since-update{[f.time_since_update for f in self.infrared_tracks if f.id in active_infrared_targets]}')
         print(
             f'i-pair-time-since-update{[f.pair_time_since_update for f in self.infrared_tracks if f.id in active_infrared_targets]}')
 
@@ -591,9 +594,9 @@ class Tracker:
     def crossmodality_match(self):
         # 提取可见光与红外的单模态轨迹
         confirmed_visible_tracks = [t.id for t in self.visible_tracks if
-                                    t.is_confirmed() and t.id in self.single_visible_ids]
+                                    t.is_confirmed() and t.id in self.single_visible_ids and t.time_since_update <= 2]
         confirmed_infrared_tracks = [t.id for t in self.infrared_tracks if
-                                     t.is_confirmed() and t.id in self.single_infrared_ids]
+                                     t.is_confirmed() and t.id in self.single_infrared_ids and t.time_since_update <= 2]
         unconfirmed_visible_tracks = [t.id for t in self.visible_tracks if t.is_confirmed()]
         unconfirmed_infrared_tracks = [t.id for t in self.infrared_tracks if t.is_confirmed()]
         all_visible_tracks = [t.id for t in self.visible_tracks if t.is_confirmed() and t.time_since_update <= 2]
@@ -616,6 +619,8 @@ class Tracker:
         matched_track_pairs_b, _, _ = self._crossmodality_match(
             all_visible_tracks,
             all_infrared_tracks,
+            # confirmed_visible_tracks,
+            # confirmed_infrared_tracks,
             _nn_iou_distance,
             self.pos_track_dist,
             all_visible_tracks,
@@ -761,11 +766,15 @@ class Tracker:
             if np.mod(self.frame_num, 10) == 0 or self.paired_bias_set == []:
                 self.bias_score_ema()
                 pose, score = self.ps_bbox_translation(all_visible_features_, all_infrared_features)
-                if self.adaptive_pose_thres:
-                    self.pos_track_dist = max(score * self.adaptive_pose_thres[0] + self.adaptive_pose_thres[1],0.4)
-                    self.pair_delete_pos_thres = max(score * self.adaptive_pose_thres[2] + self.adaptive_pose_thres[3], 0.5)
+                pose, score = self.best_bias()
+                score = 1-score
+                if self.adaptive_pose_thres:  # TODO pose-params
+                    self.pos_track_dist = max(score * self.adaptive_pose_thres[0] + self.adaptive_pose_thres[1], 0.4)
+                    self.pair_delete_pos_thres = \
+                        max(score * self.adaptive_pose_thres[2] + self.adaptive_pose_thres[3], 0.5)
+                    print('dists:', score, self.pos_track_dist, self.pair_delete_pos_thres)
             else:
-                pose = self.best_bias()
+                pose, _ = self.best_bias()
 
             visible_features_ = self.bias_adjust(visible_features_, pose)
 
@@ -841,7 +850,7 @@ class Tracker:
             t_pairs = copy.deepcopy(t_pairs_)
             vi_feat = copy.deepcopy(self.find_visible_track(t_pairs[0]).to_xywh())
             ir_feat = self.find_infrared_track(t_pairs[1]).to_xywh()
-            bias = self.best_bias()
+            bias,_ = self.best_bias()
             vi_feat[0] = vi_feat[0] * bias[2] + bias[0]
             vi_feat[1] = vi_feat[1] * bias[3] + bias[1]
             vi_feat[2] = vi_feat[2] * bias[2]
@@ -861,6 +870,7 @@ class Tracker:
             elif feat == 'pos-time':
                 vi_time_since_update = self.find_visible_track(t_pairs[0]).pair_time_since_update
                 ir_time_since_update = self.find_infrared_track(t_pairs[1]).pair_time_since_update
+                # TODO time-params
                 fixed_time_thres = max(self.pair_delete_time_thres_max - fix * 30, self.pair_delete_time_thres_min)
                 print('fixed_thres:', fixed_time_thres)
                 if vi_time_since_update + ir_time_since_update > fixed_time_thres:
@@ -974,8 +984,10 @@ class Tracker:
         # 3、计算、分配子滤波器协方差；
         # 输出：主滤波器（self），融合后子滤波器均值、协方差.
         # 在完成融合计算后，直接将融合滤波器结果更新子滤波器均值与方差
-
-        self._update_fkf(visible_track_, infrared_track_, FKFMode.both)
+        if self.input_fusion:
+            self.measurements_fusion(visible_track_, infrared_track_, FKFMode.both)
+        else:
+            self._update_fkf(visible_track_, infrared_track_, FKFMode.both)
 
         # 更新指数移动平均：视觉特征、其他轨迹信息
         visible_track_.time_since_update = 0
@@ -992,11 +1004,17 @@ class Tracker:
     def update_fkf_miss2(self, visible_track_, infrared_track_):
         visible_track_.pair_time_since_update += 1
         infrared_track_.pair_time_since_update += 1
-        self._update_fkf(visible_track_, infrared_track_, FKFMode.miss2)
+        if self.input_fusion:
+            self.measurements_fusion(visible_track_, infrared_track_, FKFMode.miss2)
+        else:
+            self._update_fkf(visible_track_, infrared_track_, FKFMode.miss2)
 
     def update_fkf_miss_visible(self, visible_track_, infrared_track_, infrared_det):
         # infrared_track_.conf = infrared_det.conf
-        self._update_fkf(visible_track_, infrared_track_, FKFMode.miss_vi)
+        if self.input_fusion:
+            self.measurements_fusion(visible_track_, infrared_track_, FKFMode.miss_vi)
+        else:
+            self._update_fkf(visible_track_, infrared_track_, FKFMode.miss_vi)
         # 更新指数移动平均：视觉特征、其他轨迹信息
         visible_track_.time_since_update = 0
         visible_track_.pair_time_since_update += 1
@@ -1011,8 +1029,11 @@ class Tracker:
 
     def update_fkf_miss_infrared(self, visible_track_, infrared_track_, visible_det):
         # visible_track_.conf = visible_det.conf
-        self._update_fkf(visible_track_, infrared_track_, FKFMode.miss_ir)
-        # 更新指数移动平均：视觉特征、其他轨迹信息
+        if self.input_fusion:
+            self.measurements_fusion(visible_track_, infrared_track_, FKFMode.miss_ir)
+        else:
+            self._update_fkf(visible_track_, infrared_track_, FKFMode.miss_ir)
+            # 更新指数移动平均：视觉特征、其他轨迹信息
         visible_track_.time_since_update = 0
         visible_track_.pair_time_since_update = 0
         if visible_track_.state == TrackState.Tentative and visible_track_.hits >= visible_track_._n_init:
@@ -1029,21 +1050,20 @@ class Tracker:
         # 1、取vel，加权平均得到融合速度；
         # 2、利用速度更新子滤波器状态；
         # 3、计算、分配子滤波器协方差；
+        best_bias,_ = self.best_bias()
+
         v_conf = copy.deepcopy(visible_track_.conf_ema)
-        v_match_mean, v_match_covariance = copy.deepcopy(visible_track_.match_mean), copy.deepcopy(
-            visible_track_.match_covariance)
-        v_vel_mean = v_match_mean[4:8]
-        # v_vel_cov = v_match_covariance[4:, 4:]
+        v_mean, v_covariance = copy.deepcopy(visible_track_.mean), copy.deepcopy(
+            visible_track_.covariance)
+        v_vel_mean = v_mean[4:8]
 
         i_conf = copy.deepcopy(infrared_track_.conf_ema)
-        i_match_mean, i_match_covariance = copy.deepcopy(infrared_track_.match_mean), copy.deepcopy(
-            infrared_track_.match_covariance)
-        i_vel_mean = i_match_mean[4:]
-        # i_vel_cov = i_match_covariance[4:, 4:]
-        # v_conf_, i_conf_ = v_conf ** 1, i_conf ** 1
+        i_mean, i_covariance = copy.deepcopy(infrared_track_.mean), copy.deepcopy(
+            infrared_track_.covariance)
+        i_vel_mean = i_mean[4:]
 
         if mode == FKFMode.both:
-            v_conf_, i_conf_ = v_conf ** 10, i_conf ** 10
+            v_conf_, i_conf_ = v_conf**10, i_conf **10
         elif mode == FKFMode.miss_vi:
             v_conf_, i_conf_ = 0, i_conf
         elif mode == FKFMode.miss_ir:
@@ -1052,11 +1072,52 @@ class Tracker:
             v_conf_, i_conf_ = v_conf, i_conf
 
         # 按照匹配度，融合子滤波器均值并更新。匹配度构成：级联匹配处的特征相似度
-        fkf_vel = (i_conf_ * i_vel_mean + v_conf_ * v_vel_mean) / (i_conf_ + v_conf_)
-        visible_track_.mean[0:4] = visible_track_.mean[0:4] + fkf_vel * self.dt
-        visible_track_.mean[4:] = fkf_vel
-        infrared_track_.mean[0:4] = infrared_track_.mean[0:4] + fkf_vel * self.dt
-        infrared_track_.mean[4:] = fkf_vel
+        # fkf_vel = (i_conf_ * i_vel_mean + v_conf_ * v_vel_mean) / (i_conf_ + v_conf_)
+        # visible_track_.match_mean[0:4] = visible_track_.match_mean[0:4] + fkf_vel * self.dt
+        # visible_track_.match_mean[4:] = fkf_vel
+        # infrared_track_.match_mean[0:4] = infrared_track_.match_mean[0:4] + fkf_vel * self.dt
+        # infrared_track_.match_mean[4:] = fkf_vel
+
+        # 更正滤波：
+        if mode == FKFMode.both:
+            s_vi = visible_track_.bbox[2] * (visible_track_.bbox[3]**2) * best_bias[2] *best_bias[3]
+            s_ir = infrared_track_.bbox[2] * (infrared_track_.bbox[3]**2)
+
+            if s_ir>2*s_vi:
+                fkf_vel = np.divide(
+                    i_vel_mean, np.array([best_bias[2], best_bias[3], best_bias[2] / best_bias[3], best_bias[3]]))
+                visible_track_.mean[0:4] = visible_track_.match_mean[0:4] + fkf_vel * self.dt
+                visible_track_.mean[4:] = fkf_vel
+            elif s_vi>2*s_ir:
+                fkf_vel = np.multiply(
+                    v_vel_mean, np.array([best_bias[2], best_bias[3], best_bias[2] / best_bias[3], best_bias[3]]))
+                infrared_track_.mean[0:4] = infrared_track_.match_mean[0:4] + fkf_vel * self.dt
+                infrared_track_.mean[4:] = fkf_vel
+
+        # 弱耦合方案：仅在不同时更新
+        if mode == FKFMode.miss2:
+            fkf_vel = (i_conf_ * i_vel_mean + v_conf_ * v_vel_mean) / (i_conf_ + v_conf_)
+            visible_track_.mean[0:4] = visible_track_.match_mean[0:4] + fkf_vel * self.dt
+            visible_track_.mean[4:] = fkf_vel
+            infrared_track_.mean[0:4] = infrared_track_.match_mean[0:4] + fkf_vel * self.dt
+            infrared_track_.mean[4:] = fkf_vel
+
+        elif mode == FKFMode.miss_ir:
+            fkf_vel = copy.deepcopy(v_vel_mean)
+            fkf_vel = np.multiply(
+                fkf_vel, np.array([best_bias[2], best_bias[3], best_bias[2]/best_bias[3], best_bias[3]]))
+            infrared_track_.mean[0:4] = infrared_track_.match_mean[0:4] + fkf_vel * self.dt
+            infrared_track_.mean[4:] = fkf_vel
+            if self.frame_num>64:
+                pass
+        elif mode == FKFMode.miss_vi:
+            fkf_vel = copy.deepcopy(i_vel_mean)
+            fkf_vel = np.divide(
+                fkf_vel, np.array([best_bias[2], best_bias[3], best_bias[2] / best_bias[3], best_bias[3]]))
+            visible_track_.mean[0:4] = visible_track_.match_mean[0:4] + fkf_vel * self.dt
+            visible_track_.mean[4:] = fkf_vel
+
+        # 强耦合方案：
 
         # 联邦滤波器协方差融合、子滤波器分配。此处协方差矩阵为对角阵，求逆步骤可以直接跳过，
         # fkf_vel_cov = np.linalg.inv(v_vel_cov) + np.linalg.inv(i_vel_cov)
@@ -1068,21 +1129,118 @@ class Tracker:
         # infrared_track_.match_covariance[4:, 4:] = i_vel_cov
 
         # 联邦滤波器协方差融合、子滤波器分配。
-        fkf_cov = v_match_covariance + i_match_covariance
-        v_vel_cov = fkf_cov * (i_conf / (i_conf + v_conf))
-        i_vel_cov = fkf_cov * (v_conf / (i_conf + v_conf))
-        # visible_track_.match_covariance = v_vel_cov
-        # infrared_track_.match_covariance = i_vel_cov
+        fkf_cov = v_covariance + i_covariance
+        v_vel_cov = fkf_cov * (min(i_conf, v_conf) / (i_conf + v_conf))
+        i_vel_cov = fkf_cov * (min(i_conf, v_conf) / (i_conf + v_conf))
 
-        # fkf_cov = (i_conf + v_conf) * (v_match_covariance @ i_match_covariance) \
-        #           @ np.linalg.inv(v_conf * i_match_covariance + i_conf*v_match_covariance)
-        # fkf_cov = (v_conf * np.linalg.inv(v_match_covariance) + i_conf * np.linalg.inv(i_match_covariance)) / (i_conf + v_conf)
-        # fkf_cov = np.linalg.inv(fkf_cov)
-        # v_vel_cov = fkf_cov * (i_conf + v_conf) / v_conf
-        # i_vel_cov = fkf_cov * (i_conf + v_conf) / i_conf
+        # 新协方差分配
+        # def c_solve(L, b):
+        #     y = np.linalg.solve(L, b)
+        #     x = np.linalg.solve(L.T, y)
+        #     return x
+        # L_vi, L_ir = np.linalg.cholesky(v_match_covariance), np.linalg.cholesky(i_match_covariance)
+        # R_vi_inv, R_ir_inv = c_solve(L_vi, np.eye(8)), c_solve(L_ir, np.eye(8))
+        # R_inv_sum = R_vi_inv + R_ir_inv
+        # L_sum = np.linalg.cholesky(R_inv_sum)
+        # R_bar = c_solve(L_sum, np.eye(8))
+
         visible_track_.match_covariance = v_vel_cov
         infrared_track_.match_covariance = i_vel_cov
         return
+
+    def measurements_fusion(self, t_vi, t_ir, mode):
+        def c_solve(L, b):
+            y = np.linalg.solve(L, b)
+            x = np.linalg.solve(L.T, y)
+            return x
+
+        if mode == FKFMode.both:
+            mean_vi, mean_ir = copy.deepcopy(t_vi.match_mean[:4]), copy.deepcopy(t_ir.mean[:4])
+            z_vi, z_ir = copy.deepcopy(t_vi.bbox), copy.deepcopy(t_ir.bbox)
+
+            # mean_vi, mean_ir = t_vi.to_xywh(), t_ir.to_xywh()
+            # mean_vi[2] /= mean_vi[3]
+            # mean_ir[2] /= mean_ir[3]
+            # z_vi, z_ir = copy.deepcopy(t_vi.bbox), copy.deepcopy(t_ir.bbox)
+            # R_vi = t_vi.kf._get_measurement_noise_std(mean_vi, t_vi.conf)
+            # R_vi = [(1-t_vi.conf) * x for x in R_vi]
+            # R_vi = np.diag(R_vi)
+            # R_ir = t_ir.kf._get_measurement_noise_std(mean_ir, t_ir.conf)
+            # R_ir = [(1 - t_ir.conf) * x for x in R_ir]
+            # R_ir = np.diag(R_ir)
+            # best_bias = self.best_bias()
+            #
+            # delta_z_vi, delta_z_ir = z_vi-mean_vi, z_ir-mean_ir
+            # h_delta_z_vi = copy.deepcopy(delta_z_vi)
+            # # [x y a h] style
+            # h_delta_z_vi[0] = delta_z_vi[0] * best_bias[2]
+            # h_delta_z_vi[1] = delta_z_vi[1] * best_bias[3]
+            # h_delta_z_vi[2] = delta_z_vi[2] * best_bias[2]/best_bias[3]
+            # h_delta_z_vi[3] = delta_z_vi[3] * best_bias[3]
+            #
+            # L_vi, L_ir = np.linalg.cholesky(R_vi), np.linalg.cholesky(R_ir)
+            # Rz_vi_inv, Rz_ir_inv = c_solve(L_vi, h_delta_z_vi), c_solve(L_ir, delta_z_ir)
+            # R_vi_inv, R_ir_inv = c_solve(L_vi, np.eye(4)), c_solve(L_ir, np.eye(4))
+            # R_inv_sum = R_vi_inv + R_ir_inv
+            # L_sum = np.linalg.cholesky(R_inv_sum)
+            # R_bar = c_solve(L_sum, np.eye(4))
+            # z_bar = R_bar@(Rz_vi_inv + Rz_ir_inv)
+            #
+            # # 还原delta_z 回 vi space
+            # z_bar_vi = copy.deepcopy(z_bar)
+            # z_bar_vi[0] = z_bar[0]/best_bias[2]
+            # z_bar_vi[1] = z_bar[1]/best_bias[3]
+            # z_bar_vi[2] = z_bar[2]/best_bias[2]*best_bias[3]
+            # z_bar_vi[3] = z_bar[3]/best_bias[3]
+            #
+            # r_bar = 1-(1-t_vi.conf)*(1-t_ir.conf)/((1-t_vi.conf)+(1-t_ir.conf))
+            # t_vi.bbox, t_vi.conf = mean_vi + z_bar_vi, r_bar
+            # t_ir.bbox, t_ir.conf = mean_ir + z_bar, r_bar
+            #
+            # # update tracks with fused dets:modify ——match_mean, not original mean
+            # t_vi.match_mean, t_vi.match_covariance = t_vi.kf.update(t_vi.mean, t_vi.covariance, t_vi.bbox, t_vi.conf)
+            # t_ir.match_mean, t_ir.match_covariance = t_ir.kf.update(t_ir.mean, t_ir.covariance, t_ir.bbox, t_ir.conf)
+            pass
+
+        elif mode == FKFMode.miss_vi:
+            mean_vi, mean_ir = copy.deepcopy(t_vi.match_mean[:4]), copy.deepcopy(t_ir.mean[:4])
+            # mean_vi[2] /= mean_vi[3]
+            # mean_ir[2] /= mean_ir[3]
+            z_ir = copy.deepcopy(t_ir.bbox)
+            delta_z_ir = z_ir - mean_ir
+
+            best_bias, _ = self.best_bias()
+            h_delta_z_ir = copy.deepcopy(delta_z_ir)
+            h_delta_z_ir[0] = delta_z_ir[0] / best_bias[2]
+            h_delta_z_ir[1] = delta_z_ir[1] / best_bias[3]
+            h_delta_z_ir[2] = delta_z_ir[2] / best_bias[2] * best_bias[3]
+            h_delta_z_ir[3] = delta_z_ir[3] / best_bias[3]
+
+            t_vi.bbox, t_vi.conf = mean_vi + h_delta_z_ir, t_ir.conf
+            t_vi.mean, t_vi.covariance = t_vi.kf.update(t_vi.mean, t_vi.covariance, t_vi.bbox, t_vi.conf)
+
+        elif mode == FKFMode.miss_ir:
+            mean_vi, mean_ir = copy.deepcopy(t_vi.match_mean[:4]), copy.deepcopy(t_ir.match_mean[:4])  # mean
+            # mean_vi[2] /= mean_vi[3]
+            # mean_ir[2] /= mean_ir[3]
+            z_vi = copy.deepcopy(t_vi.bbox)
+            delta_z_vi = z_vi - mean_vi
+
+            best_bias, _ = self.best_bias()
+            h_delta_z_vi = copy.deepcopy(delta_z_vi)
+            h_delta_z_vi[0] = delta_z_vi[0] * best_bias[2]
+            h_delta_z_vi[1] = delta_z_vi[1] * best_bias[3]
+            h_delta_z_vi[2] = delta_z_vi[2] * best_bias[2] / best_bias[3]
+            h_delta_z_vi[3] = delta_z_vi[3] * best_bias[3]
+
+            t_ir.bbox, t_ir.conf = mean_ir + h_delta_z_vi, t_vi.conf
+            t_ir.mean, t_ir.covariance = t_ir.kf.update(t_ir.mean, t_ir.covariance, t_ir.bbox, t_ir.conf)
+
+        elif mode == FKFMode.miss2:
+            pass
+
+        return
+
 
     def bias_adjust(self, adjust_features, pose):
         # bias = self.ransac_bias()
@@ -1135,12 +1293,12 @@ class Tracker:
         return np.array(best_center)
 
     def best_bias(self):
-        if not self.paired_bias_set:
-            return [0, 0, 1, 1]
+        if not self.paired_bias_set:# or max([s[1] for s in self.paired_bias_set])<0.5:
+            return [0, 0, 1, 1], 0.
         else:
             points = np.array([t[0] for t in self.paired_bias_set])
             score = np.array([t[1] for t in self.paired_bias_set])
-            return points[np.argmax(score)]
+            return points[np.argmax(score)], max(score)
 
     def bias_score_ema(self):
         for t in self.paired_bias_set:
@@ -1470,15 +1628,15 @@ class Tracker:
                 distances = 1 - box_iou(boxes1, boxes2).numpy()  # smaller better
                 row_indices, col_indices = linear_sum_assignment(distances)
                 iou_dist = np.mean(distances[row_indices, col_indices])
-
+                # TODO score according to pair num
                 score.append(iou_dist)
 
             return np.array(score)
 
         dimensions = 4
-        bounds = (np.array([-200, -10, 0.7, 0.7]), np.array([200, 10, 1.3, 1.3]))
+        bounds = (np.array([-250, -40, 0.67, 0.67]), np.array([250, 40, 1.5, 1.5]))
 
-        init_mean = self.best_bias()  # ransac_bias()
+        init_mean, _ = self.best_bias()  # ransac_bias()
 
         init_points = self.sample_from_gaussians(partical_num, bounds, init_mean)
 
@@ -1487,7 +1645,7 @@ class Tracker:
 
         source = copy.deepcopy(source_)
 
-        options = {'c1': 3, 'c2': 0.5, 'w': 0.9}
+        options = {'c1': 3, 'c2': 0.4, 'w': 0.8}
         optimized_rosenbrock = lambda x: rosenbrock(x, source, target_)
 
         # 创建全局最优 PSO 优化器

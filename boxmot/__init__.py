@@ -13,7 +13,12 @@ from boxmot.trackers.strongsort.strongsort import StrongSort
 from boxmot.trackers.imprassoc.imprassoctrack import ImprAssocTrack
 
 
-TRACKERS = ['bytetrack', 'botsort', 'strongsort', 'ocsort', 'deepocsort', 'hybridsort', 'imprassoc','rgbt_strongsort']
+TRACKERS = ['bytetrack', 'botsort', 'strongsort', 'ocsort', 'deepocsort', 'hybridsort', 'imprassoc',
+            'rgbt_strongsort',
+            'rgbt_deepocsort',
+            'rgbt_bytetrack',
+            'rgbt_hybridsort',
+            ]
 
 __all__ = ("__version__",
            "StrongSort", "OcSort", "ByteTrack", "BotSort", "DeepOcSort", "HybridSort", "ImprAssocTrack"

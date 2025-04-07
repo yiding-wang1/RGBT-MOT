@@ -2,6 +2,7 @@
 
 import os
 import numpy as np
+import copy
 
 from boxmot.motion.kalman_filters.xyah_kf import KalmanFilterXYAH
 
@@ -115,7 +116,7 @@ class Track:
 
 
     def to_xywh(self):
-        ret = self.mean[:4].copy()
+        ret = self.mean[:4] .copy()
         ret[2] *= ret[3]
         return ret
 
@@ -167,6 +168,8 @@ class Track:
         """Propagate the state distribution to the current time step using a
         Kalman filter prediction step.
         """
+        # todo temp variable changed
+        self.match_mean, self.match_covariance = copy.deepcopy(self.mean), copy.deepcopy(self.covariance)
         self.mean, self.covariance = self.kf.predict(self.mean, self.covariance)
         self.age += 1
         self.time_since_update += 1
@@ -233,7 +236,7 @@ class Track:
         self.conf = detection.conf
         self.cls = detection.cls
         self.det_ind = detection.det_ind
-        self.match_mean, self.match_covariance = self.kf.update(
+        self.mean, self.covariance = self.kf.update(
             self.mean, self.covariance, self.bbox, self.conf
         )
 
@@ -264,11 +267,12 @@ class Track:
         detection : Detection
             The associated detection.
         """
+        pass
         # self.bbox = detection.to_xyah()
         # self.conf = detection.conf
         # self.cls = detection.cls
         # self.det_ind = detection.det_ind
-        self.mean, self.covariance = self.match_mean, self.match_covariance
+        # self.mean, self.covariance = self.match_mean, self.match_covariance
 
         # self.hits += 1
         # self.time_since_update = 0

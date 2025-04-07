@@ -83,12 +83,13 @@ def run_tracker_in_thread(args, filename):
     yolo.predictor.custom_args = args
 
     for r in results:
-        img = yolo.predictor.trackers[0].plot_results(r.orig_img, args.show_trajectories)
-        if args.show and args.tracking_method != "strongsort":
-            cv2.imshow('BoxMOT', img)
-            key = cv2.waitKey(1) & 0xFF
-            if key == ord(' ') or key == ord('q'):
-                break
+        pass
+        # img = yolo.predictor.trackers[0].plot_results(r.orig_img, args.show_trajectories)
+        # if args.show and args.tracking_method != "strongsort":
+        #     cv2.imshow('BoxMOT', img)
+        #     key = cv2.waitKey(1) & 0xFF
+        #     if key == ord(' ') or key == ord('q'):
+        #         break
 
 def on_predict_start(predictor, persist=False):
     """
@@ -194,10 +195,10 @@ def parse_opt():
                         help='yolo model path')
     parser.add_argument('--reid-model', type=Path, default=WEIGHTS / 'osnet_x0_25_msmt17.pt',
                         help='reid model path')
-    parser.add_argument('--tracking-method', type=str, default='rgbt_strongsort',
+    parser.add_argument('--tracking-method', type=str, default='rgbt_hybridsort',  # 'rgbt_strongsort'
                         help='deepocsort, botsort, strongsort, ocsort, bytetrack, imprassoc')
     parser.add_argument('--source', type=str,
-                        default='E:/lasher/LasHeR_Unalined_960_0615/seleted/2ndboyfarintheforest2right/visible/',
+                        default='E:/lasher/LasHeR_Unalined_960_0615/seleted/manbikecoming/visible/',
                         help='file/dir/URL/glob, 0 for webcam')
     parser.add_argument('--dataset_source', type=str,
                         default='E:/lasher/LasHeR_Unalined_960_0615/seleted/',
@@ -319,7 +320,7 @@ if __name__ == "__main__":
             if path.is_dir() and os.path.basename(path) in eval_hard_set_v1:
                 print(os.path.basename(path))
                 opt.track_id = os.path.abspath(path)
-                opt.source = os.path.join(path, 'visible')
+                opt.source = os.path.join(path, 'visible')  # default:visible
                 run(opt)
     else:
         run(opt)

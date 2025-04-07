@@ -56,7 +56,7 @@ def min_cost_matching(
     if len(detection_indices) == 0 or len(track_indices) == 0:
         return [], track_indices, detection_indices  # Nothing to match.
 
-    cost_matrix = distance_metric(tracks, detections, track_indices, detection_indices)  #
+    cost_matrix = distance_metric(tracks, detections, track_indices, detection_indices)
     cost_matrix[cost_matrix > max_distance] = max_distance + 1e-5
     row_indices, col_indices = linear_sum_assignment(cost_matrix)
 

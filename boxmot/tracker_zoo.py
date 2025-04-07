@@ -48,7 +48,10 @@ def create_tracker(tracker_type, tracker_config=None, reid_weights=None, device=
         'deepocsort': 'boxmot.trackers.deepocsort.deepocsort.DeepOcSort',
         'hybridsort': 'boxmot.trackers.hybridsort.hybridsort.HybridSort',
         'imprassoc': 'boxmot.trackers.imprassoc.imprassoctrack.ImprAssocTrack',
-        'rgbt_strongsort':'boxmot.trackers.rgbt_strongsort.rgbt_strongsort.RGBT_StrongSort'
+        'rgbt_strongsort':'boxmot.trackers.rgbt_strongsort.rgbt_strongsort.RGBT_StrongSort',
+        'rgbt_deepocsort':'boxmot.trackers.rgbt_deepocsort.rgbt_deepocsort.RGBT_DeepOcSort',
+        'rgbt_bytetrack':'boxmot.trackers.rgbt_bytetrack.rgbt_bytetrack.RGBT_ByteTrack',
+        'rgbt_hybridsort':'boxmot.trackers.rgbt_hybridsort.rgbt_hybridsort.RGBT_HybridSort',
     }
 
     # Check if the tracker type exists in the mapping
@@ -61,7 +64,11 @@ def create_tracker(tracker_type, tracker_config=None, reid_weights=None, device=
     tracker_class = getattr(__import__(module_path, fromlist=[class_name]), class_name)
     
     # For specific trackers, update tracker arguments with ReID parameters
-    if tracker_type in ['strongsort', 'botsort', 'deepocsort', 'hybridsort', 'imprassoc','rgbt_strongsort']:
+    if tracker_type in ['strongsort', 'botsort', 'deepocsort', 'hybridsort', 'imprassoc',
+                        'rgbt_strongsort',
+                        'rgbt_deepocsort',
+                        # 'rgbt_bytetrack',
+                        'rgbt_hybridsort']:
         tracker_args['per_class'] = per_class
         tracker_args.update(reid_args)
         if tracker_type == 'strongsort':
