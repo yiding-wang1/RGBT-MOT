@@ -181,12 +181,13 @@ def run(args):
 
     # if args.tracking_method not in ["strongsort", "rgbt_strongsort"]:
     for r in results:
-        img = yolo.predictor.trackers[0].plot_results(r.orig_img, args.show_trajectories)
-        if args.show and args.tracking_method not in ["strongsort", "rgbt_strongsort"]:
-            cv2.imshow('BoxMOT', img)
-            key = cv2.waitKey(1) & 0xFF
-            if key == ord(' ') or key == ord('q'):
-                break
+        pass
+        # img = yolo.predictor.trackers[0].plot_results(r.orig_img, args.show_trajectories)
+        # if args.show and args.tracking_method not in ["strongsort", "rgbt_strongsort"]:
+        #     cv2.imshow('BoxMOT', img)
+        #     key = cv2.waitKey(1) & 0xFF
+        #     if key == ord(' ') or key == ord('q'):
+        #         break
 
 
 def parse_opt():
@@ -195,7 +196,7 @@ def parse_opt():
                         help='yolo model path')
     parser.add_argument('--reid-model', type=Path, default=WEIGHTS / 'osnet_x0_25_msmt17.pt',
                         help='reid model path')
-    parser.add_argument('--tracking-method', type=str, default='rgbt_hybridsort',  # 'rgbt_strongsort'
+    parser.add_argument('--tracking-method', type=str, default='rgbt_strongsort',  # 'rgbt_strongsort'
                         help='deepocsort, botsort, strongsort, ocsort, bytetrack, imprassoc')
     parser.add_argument('--source', type=str,
                         default='E:/lasher/LasHeR_Unalined_960_0615/seleted/manbikecoming/visible/',
@@ -300,18 +301,18 @@ if __name__ == "__main__":
         'righthunchblack'
     ]
     eval_hard_set_v1=[
-        'leftunderbasket',
+        '2ndboyfarintheforest2right',
         'blueboywalking',
         'blkcarfollowingwhite',
         'boybackpack',
         'e-tribike',
+        'leftunderbasket',
         'manbikecoming',
         'midof3girls',
-        '2ndboyfarintheforest2right',
         'righthunchblack',
-        'runninggreenboyafterwhite',
+        # 'runninggreenboyafterwhite',
+        'right2ndfarboytakinglight2left',
         'the2ndboyunderbasket',
-        # 'right2ndfarboytakinglight2left',
     ]
 
     if opt.track_all:
@@ -320,7 +321,7 @@ if __name__ == "__main__":
             if path.is_dir() and os.path.basename(path) in eval_hard_set_v1:
                 print(os.path.basename(path))
                 opt.track_id = os.path.abspath(path)
-                opt.source = os.path.join(path, 'visible')  # default:visible
+                opt.source = os.path.join(path, 'infrared')  # default:visible,infrared
                 run(opt)
     else:
         run(opt)

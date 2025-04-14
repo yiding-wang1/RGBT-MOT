@@ -18,6 +18,8 @@ TRACKERS = ['bytetrack', 'botsort', 'strongsort', 'ocsort', 'deepocsort', 'hybri
             'rgbt_deepocsort',
             'rgbt_bytetrack',
             'rgbt_hybridsort',
+            'rgbt_boost',
+            'rgbt_imprassoc',
             ]
 
 __all__ = ("__version__",

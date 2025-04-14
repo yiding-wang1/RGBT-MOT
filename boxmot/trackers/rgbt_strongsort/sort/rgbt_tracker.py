@@ -67,8 +67,8 @@ class Tracker:
         The list of active tracks at the current time step.
     """
 
-
     GATING_THRESHOLD = np.sqrt(chi2inv95[4])
+
     def __init__(
             self,
             metric,
@@ -472,7 +472,7 @@ class Tracker:
                 detections,
                 confirmed_paired_tracks,
             )
-            #
+
             unmatched_tracks_a = unmatched_tracks_a_ + confirmed_single_tracks
 
             matches_a, unmatched_tracks_a, unmatched_detections = linear_assignment.matching_cascade(
@@ -1063,7 +1063,7 @@ class Tracker:
         i_vel_mean = i_mean[4:]
 
         if mode == FKFMode.both:
-            v_conf_, i_conf_ = v_conf**10, i_conf **10
+            v_conf_, i_conf_ = v_conf**10, i_conf ** 10
         elif mode == FKFMode.miss_vi:
             v_conf_, i_conf_ = 0, i_conf
         elif mode == FKFMode.miss_ir:
@@ -1083,12 +1083,12 @@ class Tracker:
             s_vi = visible_track_.bbox[2] * (visible_track_.bbox[3]**2) * best_bias[2] *best_bias[3]
             s_ir = infrared_track_.bbox[2] * (infrared_track_.bbox[3]**2)
 
-            if s_ir>2*s_vi:
+            if s_ir > 2*s_vi:
                 fkf_vel = np.divide(
                     i_vel_mean, np.array([best_bias[2], best_bias[3], best_bias[2] / best_bias[3], best_bias[3]]))
                 visible_track_.mean[0:4] = visible_track_.match_mean[0:4] + fkf_vel * self.dt
                 visible_track_.mean[4:] = fkf_vel
-            elif s_vi>2*s_ir:
+            elif s_vi > 2*s_ir:
                 fkf_vel = np.multiply(
                     v_vel_mean, np.array([best_bias[2], best_bias[3], best_bias[2] / best_bias[3], best_bias[3]]))
                 infrared_track_.mean[0:4] = infrared_track_.match_mean[0:4] + fkf_vel * self.dt
@@ -1108,8 +1108,7 @@ class Tracker:
                 fkf_vel, np.array([best_bias[2], best_bias[3], best_bias[2]/best_bias[3], best_bias[3]]))
             infrared_track_.mean[0:4] = infrared_track_.match_mean[0:4] + fkf_vel * self.dt
             infrared_track_.mean[4:] = fkf_vel
-            if self.frame_num>64:
-                pass
+
         elif mode == FKFMode.miss_vi:
             fkf_vel = copy.deepcopy(i_vel_mean)
             fkf_vel = np.divide(
@@ -1153,11 +1152,23 @@ class Tracker:
             y = np.linalg.solve(L, b)
             x = np.linalg.solve(L.T, y)
             return x
-
+        best_bias,_ = self.best_bias()
         if mode == FKFMode.both:
-            mean_vi, mean_ir = copy.deepcopy(t_vi.match_mean[:4]), copy.deepcopy(t_ir.mean[:4])
-            z_vi, z_ir = copy.deepcopy(t_vi.bbox), copy.deepcopy(t_ir.bbox)
-
+            # mean_vi, mean_ir = copy.deepcopy(t_vi.match_mean[:4]), copy.deepcopy(t_ir.match_mean[:4])
+            # z_vi, z_ir = copy.deepcopy(t_vi.bbox), copy.deepcopy(t_ir.bbox)
+            s_vi = t_vi.bbox[2] * (t_vi.bbox[3] ** 2) * best_bias[2] * best_bias[3]
+            s_ir = t_ir.bbox[2] * (t_ir.bbox[3] ** 2)
+            v_vel_mean, i_vel_mean = copy.deepcopy(t_vi.match_mean[4:]), copy.deepcopy(t_ir.match_mean[4:])
+            if s_ir > 2 * s_vi:
+                fkf_vel = np.divide(
+                    i_vel_mean, np.array([best_bias[2], best_bias[3], best_bias[2] / best_bias[3], best_bias[3]]))
+                t_vi.mean[0:4] = t_vi.match_mean[0:4] + fkf_vel * self.dt
+                t_vi.mean[4:] = fkf_vel
+            elif s_vi > 2 * s_ir:
+                fkf_vel = np.multiply(
+                    v_vel_mean, np.array([best_bias[2], best_bias[3], best_bias[2] / best_bias[3], best_bias[3]]))
+                t_ir.mean[0:4] = t_ir.match_mean[0:4] + fkf_vel * self.dt
+                t_ir.mean[4:] = fkf_vel
             # mean_vi, mean_ir = t_vi.to_xywh(), t_ir.to_xywh()
             # mean_vi[2] /= mean_vi[3]
             # mean_ir[2] /= mean_ir[3]
@@ -1203,7 +1214,7 @@ class Tracker:
             pass
 
         elif mode == FKFMode.miss_vi:
-            mean_vi, mean_ir = copy.deepcopy(t_vi.match_mean[:4]), copy.deepcopy(t_ir.mean[:4])
+            mean_vi, mean_ir = copy.deepcopy(t_vi.match_mean[:4]), copy.deepcopy(t_ir.match_mean[:4])
             # mean_vi[2] /= mean_vi[3]
             # mean_ir[2] /= mean_ir[3]
             z_ir = copy.deepcopy(t_ir.bbox)

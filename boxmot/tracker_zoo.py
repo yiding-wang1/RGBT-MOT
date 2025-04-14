@@ -52,6 +52,8 @@ def create_tracker(tracker_type, tracker_config=None, reid_weights=None, device=
         'rgbt_deepocsort':'boxmot.trackers.rgbt_deepocsort.rgbt_deepocsort.RGBT_DeepOcSort',
         'rgbt_bytetrack':'boxmot.trackers.rgbt_bytetrack.rgbt_bytetrack.RGBT_ByteTrack',
         'rgbt_hybridsort':'boxmot.trackers.rgbt_hybridsort.rgbt_hybridsort.RGBT_HybridSort',
+        'rgbt_boost': 'boxmot.trackers.boosttrack.boosttrack.BoostTrack',
+        'rgbt_imprassoc':'boxmot.trackers.rgbt_imprassoc.rgbt_imprassoctrack.rgbt_ImprAssocTrack',
     }
 
     # Check if the tracker type exists in the mapping
@@ -68,10 +70,13 @@ def create_tracker(tracker_type, tracker_config=None, reid_weights=None, device=
                         'rgbt_strongsort',
                         'rgbt_deepocsort',
                         # 'rgbt_bytetrack',
-                        'rgbt_hybridsort']:
+                        'rgbt_hybridsort',
+                        'rgbt_boost',
+                        'rgbt_imprassoc',
+                        ]:
         tracker_args['per_class'] = per_class
         tracker_args.update(reid_args)
-        if tracker_type == 'strongsort':
+        if tracker_type == 'strongsort' or 'rgbt_boost':
             tracker_args.pop('per_class')  # per class not supported by
     else:
         tracker_args['per_class'] = per_class

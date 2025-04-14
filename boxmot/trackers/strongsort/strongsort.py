@@ -2,6 +2,9 @@
 
 import numpy as np
 import cv2
+import os
+import csv
+import glob
 from torch import device
 from pathlib import Path
 
@@ -12,6 +15,103 @@ from boxmot.trackers.strongsort.sort.tracker import Tracker
 from boxmot.utils.matching import NearestNeighborDistanceMetric
 from boxmot.utils.ops import xyxy2tlwh
 from boxmot.trackers.basetracker import BaseTracker
+
+
+def infrared_preprocess(image):
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+
+    # 分离图像的三个通道
+    b, g, r = cv2.split(image)
+    # 对每个通道应用 CLAHE 算法
+    b_clahe = clahe.apply(b)
+    g_clahe = clahe.apply(g)
+    r_clahe = clahe.apply(r)
+
+    # 合并处理后的通道
+    image_clahe = cv2.merge((b_clahe, g_clahe, r_clahe))
+    return image_clahe
+
+def get_img_names(root_dir, sub_dir):
+    # 拼接指定子目录的完整路径
+    target_dir = os.path.join(root_dir, sub_dir)
+    # 使用 glob 模块查找指定子目录下所有的 .jpg 文件
+    jpg_files = glob.glob(os.path.join(target_dir, '*.jpg'))
+    # 从完整文件路径中提取文件名
+    file_names = [os.path.basename(file) for file in jpg_files]
+    return file_names
+
+def xyxyn2xyxy(xyxyn, img_shape):
+    xyxy = np.zeros(shape=xyxyn.shape)
+    xyxy[:, 0] = xyxyn[:, 0] * img_shape[1]
+    xyxy[:, 1] = xyxyn[:, 1] * img_shape[0]
+    xyxy[:, 2] = xyxyn[:, 2] * img_shape[1]
+    xyxy[:, 3] = xyxyn[:, 3] * img_shape[0]
+    return xyxy
+
+
+def get_img_dets(root_dir, sub_dir, thres):
+    # 拼接指定子目录的完整路径
+    target_dir = os.path.join(root_dir, sub_dir, 'det.csv')
+    # 从完整文件路径中提取文件名
+    result = {}
+    with open(target_dir, 'r', newline='', encoding='utf-8') as csvfile:
+        reader = csv.reader(csvfile)
+        next(reader)
+        for row in reader:
+            float_row = []
+            for value in row:
+                float_value = float(value)
+                float_row.append(float_value)
+            cls = int(float_row[6])
+            score = float(float_row[5])
+            if cls!=0 or score<thres:
+                continue
+            try:
+                index = int(float_row[0])
+                if index not in result:
+                    result[index] = []
+                # row.append(clk)
+                # clk+=1
+                result[index].append(row)
+            except (ValueError, IndexError):
+                print(f"处理行 {float_row} 时出错，索引{index}可能不是有效的整数或者行为空。")
+
+    for key, value in result.items():
+        # 获取当前二维列表的行数
+        rows = len(value)
+        for i in range(rows):
+            if len(value[i]) > 0:
+                # 如果二维列表的子列表不为空，则设置最后一列的值
+                if len(value[i]) == 1:
+                    # 如果子列表只有一个元素，则直接赋值
+                    value[i] = [i]
+                else:
+                    # 否则，最后一个元素
+                    value[i].append(i)
+    return result
+
+
+def save_results(frame_number, save_path, outputs, modality):
+    if not os.path.exists(os.path.dirname(save_path)):
+        os.makedirs(os.path.dirname(save_path))
+    visible_path = save_path + '_'+modality+'.txt'
+    if frame_number > 1:
+        v_fi = open(visible_path, 'a+')
+        for x in outputs:
+            x1, y1, x2, y2, id, conf, cls, ind = x[0]
+            v_fi.write(f"{frame_number - 1},"
+                     f"{id},"
+                     f"{x1},"
+                     f"{y1},"
+                     f"{x2-x1},"
+                     f"{y2-y1},1,"
+                     f"{cls},1"
+                     + '\n')
+        v_fi.close()
+
+    elif frame_number == 1:  # refresh history records
+        v_fi = open(visible_path, 'w')
+        v_fi.close()
 
 
 class StrongSort(object):
@@ -44,6 +144,8 @@ class StrongSort(object):
         nn_budget=100,
         mc_lambda=0.98,
         ema_alpha=0.9,
+        track_id=0,
+        track_all=True
     ):
 
         self.per_class = per_class
@@ -61,6 +163,16 @@ class StrongSort(object):
         )
         self.cmc = get_cmc_method('ecc')()
 
+        self.frame_count = 0
+        self.modality = 'infrared'
+        self.img_path = track_id
+        self.visible_img_list = get_img_names(self.img_path, self.modality)
+        self.visible_img_size = cv2.imread(os.path.join(self.img_path, self.modality, self.visible_img_list[0])).shape
+        self.track_all = track_all
+        self.subset = os.path.basename(track_id)
+        self.detects = get_img_dets(self.img_path, self.modality + '/det', thres=0.4)
+        self.output_path = "../output_tracks/strongsort/data/" + os.path.basename(self.img_path)
+
     @BaseTracker.per_class_decorator
     def update(self, dets: np.ndarray, img: np.ndarray, embs: np.ndarray = None) -> np.ndarray:
         assert isinstance(
@@ -76,8 +188,20 @@ class StrongSort(object):
             dets.shape[1] == 6
         ), "Unsupported 'dets' 2nd dimension lenght, valid lenghts is 6"
 
-        dets = np.hstack([dets, np.arange(len(dets)).reshape(-1, 1)])
-        xyxy = dets[:, 0:4]
+        visible_dets = self.detects[self.frame_count] if self.frame_count in self.detects.keys() \
+            else np.zeros(shape=(0, 8))
+        dets = np.array(visible_dets, dtype=float)[:, 1:]
+        xyxyn = dets[:, :4].astype(float)
+        xyxy = xyxyn2xyxy(xyxyn, self.visible_img_size)
+        dets[:, :4] = xyxy
+        img = self.visible_img_list[self.frame_count]
+        img = cv2.imread(os.path.join(self.img_path, self.modality, img))
+        img = infrared_preprocess(img)
+
+        self.frame_count += 1
+
+        # dets = np.hstack([dets, np.arange(len(dets)).reshape(-1, 1)])
+        # xyxy = dets[:, 0:4]
         confs = dets[:, 4]
         clss = dets[:, 5]
         det_ind = dets[:, 6]
@@ -153,6 +277,8 @@ class StrongSort(object):
             # im1 = cv2.resize(img, (1920, 1080))
             cv2.imshow('frame', img)
             cv2.waitKey()
+
+        save_results(self.frame_count, self.output_path, outputs, self.modality)
 
         if len(outputs) > 0:
             return np.concatenate(outputs)

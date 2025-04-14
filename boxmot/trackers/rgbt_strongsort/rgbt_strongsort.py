@@ -66,13 +66,13 @@ class RGBT_StrongSort(object):
             weights=reid_weights, device=device, half=half
         ).model
 
-        max_cos_dist = 0.2
-        max_age = 30
-        max_iou_dist = 0.9  # ！！！！！！！！！！！！！！！！！
-        self.exp_id = 'bs_strongsort'
+        # max_cos_dist = 0.2
+        # max_age = 30
+        max_iou_dist = 0.8  # ！！！！！！！！！！！！！！！！！
+        self.exp_id = '414_4'
 
         # whether track different model seperately
-        self.seperate_track = True
+        self.seperate_track = False
         if self.seperate_track:
             self.tracker = SeperateTracker(
                 metric=NearestNeighborDistanceMetric("cosine", max_cos_dist, nn_budget),
@@ -110,8 +110,8 @@ class RGBT_StrongSort(object):
         self.visible_img_size = cv2.imread(os.path.join(self.img_path, 'visible', self.visible_img_list[0])).shape
         self.infrared_img_size = cv2.imread(os.path.join(self.img_path, 'infrared', self.infrared_img_list[0])).shape
         self.frame_len = len(self.infrared_img_list)
-        self.visible_dets_list = get_img_dets(self.img_path, 'visible/det', self.frame_len, thres=0.4)
-        self.infrared_dets_list = get_img_dets(self.img_path, 'infrared/det', self.frame_len, thres=0.4)
+        self.visible_dets_list = get_img_dets(self.img_path, 'visible/det', self.frame_len, thres=0.3)
+        self.infrared_dets_list = get_img_dets(self.img_path, 'infrared/det', self.frame_len, thres=0.3)
 
         self.visualize = not track_all
         self.save_output = track_all
