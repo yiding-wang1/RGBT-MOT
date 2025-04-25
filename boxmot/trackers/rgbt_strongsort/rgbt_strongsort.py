@@ -24,6 +24,8 @@ import csv
 import cv2
 from PIL import Image
 import pickle
+import time
+import json
 
 
 class RGBT_StrongSort(object):
@@ -66,10 +68,10 @@ class RGBT_StrongSort(object):
             weights=reid_weights, device=device, half=half
         ).model
 
-        # max_cos_dist = 0.2
-        # max_age = 30
-        max_iou_dist = 0.8  # ！！！！！！！！！！！！！！！！！
-        self.exp_id = '414_4'
+        max_cos_dist = 0.2
+        max_age = 30
+        max_iou_dist = 0.9  # ！！！！！！！！！！！！！！！！！
+        self.exp_id = '425_2'
 
         # whether track different model seperately
         self.seperate_track = False
@@ -92,9 +94,12 @@ class RGBT_StrongSort(object):
                 ema_alpha=ema_alpha,
                 exp_id=self.exp_id
             )
-        self.cmc = get_cmc_method('ecc')()
+        self.cmc_vi = get_cmc_method('ecc')()
+        self.cmc_ir = get_cmc_method('ecc')()
+
         self.frame_num = 0
-        self.subset = 'manbikecoming'
+        self.total_time = 0
+        self.subset = 'leftunderbasket'
 
         if track_all:
             self.img_path = track_id
@@ -110,8 +115,8 @@ class RGBT_StrongSort(object):
         self.visible_img_size = cv2.imread(os.path.join(self.img_path, 'visible', self.visible_img_list[0])).shape
         self.infrared_img_size = cv2.imread(os.path.join(self.img_path, 'infrared', self.infrared_img_list[0])).shape
         self.frame_len = len(self.infrared_img_list)
-        self.visible_dets_list = get_img_dets(self.img_path, 'visible/det', self.frame_len, thres=0.3)
-        self.infrared_dets_list = get_img_dets(self.img_path, 'infrared/det', self.frame_len, thres=0.3)
+        self.visible_dets_list = get_img_dets(self.img_path, 'visible/det', '424_Ten_Ien_', thres=0.4)
+        self.infrared_dets_list = get_img_dets(self.img_path, 'infrared/det', '424_Ten_Ien_', thres=0.4)
 
         self.visualize = not track_all
         self.save_output = track_all
@@ -176,10 +181,6 @@ class RGBT_StrongSort(object):
 
         # print(f"infrared_bbox={infrared_xyxy}")
 
-        if len(self.tracker.visible_tracks) >= 1:
-            warp_matrix = self.cmc.apply(visible_img, visible_xyxy)
-            for track in self.tracker.visible_tracks:
-                track.camera_update(warp_matrix)
 
         # extract appearance information for each detection -- visible
         visible_features = self.model.get_features(visible_xyxy, visible_img)
@@ -194,11 +195,37 @@ class RGBT_StrongSort(object):
             zip(visible_tlwh, visible_confs, visible_clss, visible_det_ind, visible_features, share_visible_features)
         ]
 
-        if len(self.tracker.infrared_tracks) >= 1:
-            if self.seperate_track:
-                warp_matrix = self.cmc.apply(infrared_img, infrared_xyxy)
-            for track in self.tracker.infrared_tracks:
-                track.camera_update(warp_matrix)
+        start_time1 = time.time()  # cmc time
+
+        if len(self.tracker.visible_tracks) >= 1:
+            warp_matrix_vi, conf_cmc_vi = self.cmc_vi.apply(visible_img, visible_xyxy)
+            for track in self.tracker.visible_tracks:
+                track.camera_update(warp_matrix_vi)
+            if len(self.tracker.infrared_tracks) >= 1:
+                for track in self.tracker.infrared_tracks:
+                    track.camera_update(warp_matrix_vi)
+
+        # if len(self.tracker.visible_tracks) >= 1 and len(self.tracker.infrared_tracks) >= 1:
+        #     warp_matrix_vi, conf_cmc_vi = self.cmc_vi.apply(visible_img, visible_xyxy)
+        #     warp_matrix_ir, conf_cmc_ir = self.cmc_ir.apply(infrared_img, infrared_xyxy)
+        #     print(conf_cmc_vi, conf_cmc_ir)
+        #     if conf_cmc_vi == 0.:
+        #         warp_matrix_b = warp_matrix_ir
+        #     else:
+        #         warp_matrix_b = warp_matrix_vi
+        #     for track in self.tracker.visible_tracks:
+        #         track.camera_update(warp_matrix_b)
+        #     for track in self.tracker.infrared_tracks:
+        #         track.camera_update(warp_matrix_b)
+        #
+        # elif len(self.tracker.visible_tracks) >= 1:
+        #     warp_matrix_vi, conf_cmc_vi = self.cmc_vi.apply(visible_img, visible_xyxy)
+        #     for track in self.tracker.visible_tracks:
+        #         track.camera_update(warp_matrix_vi)
+        #     for track in self.tracker.infrared_tracks:
+        #         track.camera_update(warp_matrix_vi)
+
+        time_cmc = time.time() - start_time1
 
         # extract appearance information for each detection -- infrared
         infrared_features = self.model.get_features(infrared_xyxy, infrared_img)
@@ -214,9 +241,14 @@ class RGBT_StrongSort(object):
                 share_infrared_features)
         ]
 
+        start_time2 = time.time()  # tracking algorithm time
+
         # update tracker with dual modality detections, within-modality features and cross-modality features
         self.tracker.predict()
         self.tracker.update(visible_detections, infrared_detections, self.frame_num)
+
+        time_all = time.time() - start_time2 + time_cmc
+        self.total_time += time_all
 
         # output bbox identities in both modality
         visible_outputs = []
@@ -264,7 +296,8 @@ class RGBT_StrongSort(object):
         # print(f"infrared_outputs:{infrared_outputs}")
 
         if self.visualize:
-            show_both_result(visible_outputs, infrared_outputs, copy.deepcopy(visible_img), copy.deepcopy(infrared_img),self.frame_num, self.subset)
+            pass
+            # show_both_result(visible_outputs, infrared_outputs, copy.deepcopy(visible_img), copy.deepcopy(infrared_img),self.frame_num, self.subset)
             # save_both_results(self.frame_num, save_path=self.output_path,
             #                   visible_outputs=visible_outputs, infrared_outputs=infrared_outputs,
             #                   paired_tracks=paired_tracks, separate_tracking=self.seperate_track)
@@ -274,10 +307,13 @@ class RGBT_StrongSort(object):
         if self.save_output:
             save_both_results(self.frame_num, save_path=self.output_path,
                               visible_outputs=visible_outputs, infrared_outputs=infrared_outputs,
-                              paired_tracks=paired_tracks, separate_tracking=self.seperate_track)
-            # show_both_result(visible_outputs, infrared_outputs,
-            #                  copy.deepcopy(visible_img), copy.deepcopy(infrared_img),
-            #                  self.frame_num, self.subset)
+                              paired_tracks=paired_tracks, separate_tracking=self.seperate_track, time_=self.total_time)
+            show_both_result(visible_outputs, infrared_outputs,
+                             copy.deepcopy(visible_img), copy.deepcopy(infrared_img),
+                             self.frame_num, self.subset)
+            show_both_det(visible_xyxy, infrared_xyxy,
+                          copy.deepcopy(visible_img), copy.deepcopy(infrared_img),
+                          self.frame_num, self.subset, visible_confs, infrared_confs)
         return np.array([])
 
     def get_modality_features_deen_vi(self, modality_xyxys, modality_img):
@@ -388,9 +424,9 @@ def get_img_names(root_dir, sub_dir):
     return file_names
 
 
-def get_img_dets(root_dir, sub_dir, frame_len, thres):
+def get_img_dets(root_dir, sub_dir, version, thres):
     # 拼接指定子目录的完整路径
-    target_dir = os.path.join(root_dir, sub_dir, 'det.csv')
+    target_dir = os.path.join(root_dir, sub_dir, version+'det.csv')
     # 从完整文件路径中提取文件名
     result = {}
     with open(target_dir, 'r', newline='', encoding='utf-8') as csvfile:
@@ -474,7 +510,7 @@ def show_both_result(visible_outputs, infrared_outputs, visible_img, infrared_im
                 thickness
             )
     combined_img = cv2.hconcat([visible_img, infrared_img])
-    save_path = f"./output_imgs_329v1_4/{subset}/{frame_num}.jpg"
+    save_path = f"./output_imgs_424_3/{subset}/{frame_num}.jpg"
     if not os.path.exists(os.path.dirname(save_path)):
         os.makedirs(os.path.dirname(save_path))
     cv2.imwrite(save_path, combined_img)
@@ -525,22 +561,24 @@ def show_both_det(visible_xyxy, infrared_xyxy, visible_img, infrared_img, frame_
             thickness
         )
     combined_img = cv2.hconcat([visible_img, infrared_img])
-    save_path = f"./output_imgs_det/{subset}_det/{frame_num}.jpg"
+    save_path = f"./output_imgs_det_en/{subset}_det/{frame_num}.jpg"
     if not os.path.exists(os.path.dirname(save_path)):
         os.makedirs(os.path.dirname(save_path))
     cv2.imwrite(save_path, combined_img)
+    print('save successfully')
     # combined_img = cv2.resize(combined_img, (0, 0), fx=0.5, fy=0.5)
     # cv2.imshow('frame', combined_img)
     # cv2.waitKey()
     return
 
 
-def save_both_results(frame_number, save_path, visible_outputs, infrared_outputs, paired_tracks, separate_tracking=True):
+def save_both_results(frame_number, save_path, visible_outputs, infrared_outputs, paired_tracks, time_, separate_tracking=True):
     if not os.path.exists(os.path.dirname(save_path)):
         os.makedirs(os.path.dirname(save_path))
     visible_path = save_path + '_visible.txt'
     infrared_path = save_path + '_infrared.txt'
     paired_id_path = save_path + '_paired_id.pickle'
+    fps_path = os.path.dirname(save_path)+'/fps.json'
     if frame_number > 1:
         v_fi = open(visible_path, 'a+')
         for x in visible_outputs:
@@ -580,6 +618,17 @@ def save_both_results(frame_number, save_path, visible_outputs, infrared_outputs
                 pickle.dump(data_list, p_fi)
                 p_fi.close()
 
+        try:
+            with open(fps_path, 'r+') as t_fi:
+                history_t = json.load(t_fi)
+                history_t = [history_t[0] + time_, history_t[1] + 1]
+                t_fi.seek(0)
+                json.dump(history_t, t_fi)
+                t_fi.truncate()
+        except FileNotFoundError:
+            with open(fps_path, 'w') as t_fi:
+                json.dump([time_, 1.], t_fi)
+
         ##  !!!!!!!!!!!标签
 
     elif frame_number == 1:  # refresh history records
@@ -587,8 +636,8 @@ def save_both_results(frame_number, save_path, visible_outputs, infrared_outputs
         v_fi.close()
         i_fi = open(infrared_path, 'w')
         i_fi.close()
-        # p_fi = open(paired_id_path, 'w')
-        # p_fi.close()
+        p_fi = open(paired_id_path, 'w')
+        p_fi.close()
 
 
 

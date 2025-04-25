@@ -107,8 +107,7 @@ def save_results(frame_number, save_path, outputs, modality):
                      f"{x1},"
                      f"{y1},"
                      f"{x2-x1},"
-                     f"{y2-y1},1,"
-                     f"{cls},1"
+                     f"{y2-y1},1,1,1"
                      + '\n')
         v_fi.close()
 

@@ -800,6 +800,69 @@ class Tracker:
 
         return pairs, unpaired_visible, unpaired_infrared
 
+    def update_p_t(self, P_t_prev, Q_t):
+        # 策略1：保留符合条件的旧匹配对
+        prev_M = {m for (m, n) in P_t_prev}
+        prev_N = {n for (m, n) in P_t_prev}
+        Q_M = {m for (m, n) in Q_t}
+        Q_N = {n for (m, n) in Q_t}
+
+        # 保留策略1的匹配对
+        P_retained = set()
+        for pair in P_t_prev:
+            m_p, n_p = pair
+            # 条件：当前对存在于Q_t中，或者两个元素均不在Q_t的任何元素中出现
+            if pair in Q_t or (m_p not in Q_M and n_p not in Q_N):
+                P_retained.add(pair)
+
+        P_t = set(P_retained)  # 初始化P_t为策略1保留的集合
+
+        # 处理Q_t中的每个元素对
+        for q_pair in Q_t:
+            m, n = q_pair
+            if q_pair in P_retained:
+                continue  # 已由策略1处理，跳过
+
+            # 检查元素在旧对中的存在情况
+            m_in_prev_M = m in prev_M
+            n_in_prev_N = n in prev_N
+
+            # 策略2：两个元素均未在旧对中出现
+            if not m_in_prev_M and not n_in_prev_N:
+                P_t.add(q_pair)
+            else:
+                # 策略3：其中一个元素存在，另一个不存在
+                if (m_in_prev_M and not n_in_prev_N) or (not m_in_prev_M and n_in_prev_N):
+                    to_remove = set()
+                    # 找到旧对中包含m或n的对
+                    if m_in_prev_M:
+                        # 找M中的m对应的旧对
+                        pair_m = next((p for p in P_t_prev if p[0] == m), None)
+                        if pair_m in P_retained:
+                            to_remove.add(pair_m)
+                    if n_in_prev_N:
+                        # 找N中的n对应的旧对
+                        pair_n = next((p for p in P_t_prev if p[1] == n), None)
+                        if pair_n in P_retained:
+                            to_remove.add(pair_n)
+                    # 删除旧对并新增当前对
+                    P_t -= to_remove
+                    P_t.add(q_pair)
+                # 策略4：两个元素分别在旧的不同对中
+                elif m_in_prev_M and n_in_prev_N:
+                    # 查找旧对中的m对应的对和n对应的对
+                    pair_m = next((p for p in P_t_prev if p[0] == m), None)
+                    pair_n = next((p for p in P_t_prev if p[1] == n), None)
+                    if pair_m != pair_n and pair_m is not None and pair_n is not None:
+                        to_remove = set()
+                        if pair_m in P_retained:
+                            to_remove.add(pair_m)
+                        if pair_n in P_retained:
+                            to_remove.add(pair_n)
+                        P_t -= to_remove
+                        P_t.add(q_pair)
+        return P_t
+
     def delete_time_adjust(self):
         def iou(bbox1, bbox2):
             source_xyxy = np.hstack((bbox1[:2] - bbox1[2:] / 2, bbox1[:2] + bbox1[2:] / 2))
@@ -1083,12 +1146,12 @@ class Tracker:
             s_vi = visible_track_.bbox[2] * (visible_track_.bbox[3]**2) * best_bias[2] *best_bias[3]
             s_ir = infrared_track_.bbox[2] * (infrared_track_.bbox[3]**2)
 
-            if s_ir > 2*s_vi:
+            if s_ir > 1.5*s_vi:
                 fkf_vel = np.divide(
                     i_vel_mean, np.array([best_bias[2], best_bias[3], best_bias[2] / best_bias[3], best_bias[3]]))
                 visible_track_.mean[0:4] = visible_track_.match_mean[0:4] + fkf_vel * self.dt
                 visible_track_.mean[4:] = fkf_vel
-            elif s_vi > 2*s_ir:
+            elif s_vi > 1.5*s_ir:
                 fkf_vel = np.multiply(
                     v_vel_mean, np.array([best_bias[2], best_bias[3], best_bias[2] / best_bias[3], best_bias[3]]))
                 infrared_track_.mean[0:4] = infrared_track_.match_mean[0:4] + fkf_vel * self.dt
@@ -1160,15 +1223,9 @@ class Tracker:
             s_ir = t_ir.bbox[2] * (t_ir.bbox[3] ** 2)
             v_vel_mean, i_vel_mean = copy.deepcopy(t_vi.match_mean[4:]), copy.deepcopy(t_ir.match_mean[4:])
             if s_ir > 2 * s_vi:
-                fkf_vel = np.divide(
-                    i_vel_mean, np.array([best_bias[2], best_bias[3], best_bias[2] / best_bias[3], best_bias[3]]))
-                t_vi.mean[0:4] = t_vi.match_mean[0:4] + fkf_vel * self.dt
-                t_vi.mean[4:] = fkf_vel
+                mode == FKFMode.miss_vi
             elif s_vi > 2 * s_ir:
-                fkf_vel = np.multiply(
-                    v_vel_mean, np.array([best_bias[2], best_bias[3], best_bias[2] / best_bias[3], best_bias[3]]))
-                t_ir.mean[0:4] = t_ir.match_mean[0:4] + fkf_vel * self.dt
-                t_ir.mean[4:] = fkf_vel
+                mode == FKFMode.miss_ir
             # mean_vi, mean_ir = t_vi.to_xywh(), t_ir.to_xywh()
             # mean_vi[2] /= mean_vi[3]
             # mean_ir[2] /= mean_ir[3]
@@ -1213,7 +1270,7 @@ class Tracker:
             # t_ir.match_mean, t_ir.match_covariance = t_ir.kf.update(t_ir.mean, t_ir.covariance, t_ir.bbox, t_ir.conf)
             pass
 
-        elif mode == FKFMode.miss_vi:
+        if mode == FKFMode.miss_vi:
             mean_vi, mean_ir = copy.deepcopy(t_vi.match_mean[:4]), copy.deepcopy(t_ir.match_mean[:4])
             # mean_vi[2] /= mean_vi[3]
             # mean_ir[2] /= mean_ir[3]
@@ -1250,6 +1307,7 @@ class Tracker:
         elif mode == FKFMode.miss2:
             pass
 
+
         return
 
 
@@ -1266,7 +1324,6 @@ class Tracker:
     def sample_from_gaussians(self, num_samples, bounds, means, stds=np.array([10, 10, 0.1, 0.1])):
         all_samples = []
         # 遍历四个高斯分布的均值和标准差
-
         for mean, std in zip(means, stds):
             # 从当前的一维高斯分布中进行采样
             samples = np.random.normal(mean, std, num_samples)
@@ -1307,8 +1364,8 @@ class Tracker:
         if not self.paired_bias_set:# or max([s[1] for s in self.paired_bias_set])<0.5:
             return [0, 0, 1, 1], 0.
         else:
-            points = np.array([t[0] for t in self.paired_bias_set])
-            score = np.array([t[1] for t in self.paired_bias_set])
+            points = np.array([t[0] for t in self.paired_bias_set[-10:]])
+            score = np.array([t[1] for t in self.paired_bias_set[-10:]])
             return points[np.argmax(score)], max(score)
 
     def bias_score_ema(self):
@@ -1775,3 +1832,28 @@ def _nn_iou_distance(bbox, bboxes):
             ious[i] = 1 - area_inter / area_union * scale
 
     return ious
+
+
+'''
+1、PSO
+    基于中心点坐标欧氏距离的icp
+    基于中心点坐标欧氏距离的pso
+    基于bbox iou距离的ICP
+    基于bbox iou距离的pso
+
+2、滤波器策略
+    输入融合
+    状态空间融合
+    
+    融合所有匹配轨迹
+    仅融合单模态缺失检测的情况
+
+3、匹配轨迹管理策略
+
+    时间阈值
+    位置阈值
+    时间+位置阈值
+
+3、低质量检测滤除
+
+'''

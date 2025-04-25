@@ -75,7 +75,7 @@ class ECC(BaseCMC):
 
         if self.prev_img is None:
             self.prev_img = self.preprocess(img)
-            return warp_matrix
+            return warp_matrix, 0.
 
         img = self.preprocess(img)
 
@@ -91,7 +91,7 @@ class ECC(BaseCMC):
             )
         except Exception as e:
             LOGGER.warning(f'Affine matrix could not be generated: {e}. Returning identity')
-            return warp_matrix
+            return warp_matrix, 0.
 
         # upscale warp matrix to original images size
         if self.scale < 1:
@@ -111,7 +111,7 @@ class ECC(BaseCMC):
 
         self.prev_img = img
 
-        return warp_matrix  # , prev_img_aligned
+        return warp_matrix, ret_val  # , prev_img_aligned
 
 
 def main():

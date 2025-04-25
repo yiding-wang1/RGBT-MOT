@@ -49,9 +49,9 @@ def xyxyn2xyxy(xyxyn, img_shape):
     return xyxy
 
 
-def get_img_dets(root_dir, sub_dir, thres):
+def get_img_dets(root_dir, sub_dir, version, thres):
     # 拼接指定子目录的完整路径
-    target_dir = os.path.join(root_dir, sub_dir, 'det.csv')
+    target_dir = os.path.join(root_dir, sub_dir, version+'det.csv')
     # 从完整文件路径中提取文件名
     result = {}
     with open(target_dir, 'r', newline='', encoding='utf-8') as csvfile:
@@ -164,14 +164,14 @@ class StrongSort(object):
         self.cmc = get_cmc_method('ecc')()
 
         self.frame_count = 0
-        self.modality = 'infrared'
+        self.modality = 'visible'
         self.img_path = track_id
         self.visible_img_list = get_img_names(self.img_path, self.modality)
         self.visible_img_size = cv2.imread(os.path.join(self.img_path, self.modality, self.visible_img_list[0])).shape
         self.track_all = track_all
         self.subset = os.path.basename(track_id)
-        self.detects = get_img_dets(self.img_path, self.modality + '/det', thres=0.4)
-        self.output_path = "../output_tracks/strongsort/data/" + os.path.basename(self.img_path)
+        self.detects = get_img_dets(self.img_path, self.modality + '/det', '424_Ten_Ien_', 0.4)
+        self.output_path = "../output_tracks/strongsort_424_Ten_Ien/data/" + os.path.basename(self.img_path)
 
     @BaseTracker.per_class_decorator
     def update(self, dets: np.ndarray, img: np.ndarray, embs: np.ndarray = None) -> np.ndarray:
@@ -207,7 +207,7 @@ class StrongSort(object):
         det_ind = dets[:, 6]
 
         if len(self.tracker.tracks) >= 1:
-            warp_matrix = self.cmc.apply(img, xyxy)
+            warp_matrix, _ = self.cmc.apply(img, xyxy)
             for track in self.tracker.tracks:
                 track.camera_update(warp_matrix)
 
@@ -216,9 +216,6 @@ class StrongSort(object):
             features = embs
         else:
             features = self.model.get_features(xyxy, img)
-
-        # 待添加cross_modality_feature
-        # 待添加双模态输入
 
         tlwh = xyxy2tlwh(xyxy)
         detections = [
@@ -278,8 +275,8 @@ class StrongSort(object):
             cv2.imshow('frame', img)
             cv2.waitKey()
 
-        save_results(self.frame_count, self.output_path, outputs, self.modality)
-
+        # save_results(self.frame_count, self.output_path, outputs, self.modality)
+        show_both_result(img, outputs, self.frame_count, self.subset, self.modality)
         if len(outputs) > 0:
             return np.concatenate(outputs)
 
@@ -287,3 +284,37 @@ class StrongSort(object):
 
     def plot_results(img: np.ndarray, show_trajectories: bool, thickness: int = 2, fontscale: float = 0.5):
         pass
+
+
+def show_both_result(visible_img, visible_outputs, frame_num, subset, modality):
+    color = (0, 0, 255)  # BGR
+    thickness = 2
+    fontscale = 0.5
+    if len(visible_outputs) != 0:
+        for x in visible_outputs:
+            x1, y1, x2, y2, id, conf, cls, ind = x[0]
+            cv2.rectangle(
+                visible_img,
+                (int(x1), int(y1)),
+                (int(x2), int(y2)),
+                color,
+                thickness
+            )
+            cv2.putText(
+                visible_img,
+                f'id:{int(id)}',#,conf:{conf:.2f}',  # f'id: {id}, conf: {conf}, c: {cls}',
+                (int(x1), int(y1) - 10),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                fontscale,
+                color,
+                thickness
+            )
+    save_path = f"./output_imgs_strongsort/{subset}_{modality}/{frame_num}.jpg"
+    if not os.path.exists(os.path.dirname(save_path)):
+        os.makedirs(os.path.dirname(save_path))
+    cv2.imwrite(save_path, visible_img)
+    # combined_img = cv2.resize(combined_img, (0, 0), fx=0.5, fy=0.5)
+    # cv2.imshow(f'frame {frame_num}', combined_img)
+    # cv2.waitKey()
+
+    return
