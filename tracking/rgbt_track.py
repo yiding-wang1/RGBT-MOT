@@ -199,12 +199,12 @@ def parse_opt():
     parser.add_argument('--tracking-method', type=str, default='rgbt_strongsort',  # 'rgbt_strongsort'
                         help='deepocsort, botsort, strongsort, ocsort, bytetrack, imprassoc')
     parser.add_argument('--source', type=str,
-                        default='E:/lasher/LasHeR_Unalined_960_0615/seleted/leftunderbasket/visible/',
+                        default='E:/lasher/LasHeR_Unalined_960_0615/seleted/leftunderbasket/infrared/',
                         help='file/dir/URL/glob, 0 for webcam')
     parser.add_argument('--dataset_source', type=str,
                         default='E:/lasher/LasHeR_Unalined_960_0615/seleted/',
                         help='file/dir/URL/glob, 0 for webcam')
-    parser.add_argument('--track_all', default=False,
+    parser.add_argument('--track_all', default=True,
                         help='track all subsets at once')
     parser.add_argument('--track_id', type=str, default='',
                         help='track all subsets at once')

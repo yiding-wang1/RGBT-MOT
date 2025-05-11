@@ -83,16 +83,16 @@ class Tracker:
             deep_track_dist=0.45,
             pos_track_dist=0.4,
             pair_delete_pos_thres=0.5,
-            pair_delete_time_thres_max=30,
+            pair_delete_time_thres_max=60,
             pair_delete_time_thres_min=10,
             pair_delete_deep_thres=0.45,
             soft_nms_thres=0.8,
             exp_id='',
-            adaptive_pose_thres=True,  # [1, 0.1, 1, 0.3]
+            adaptive_pose_thres=True,  # [2., 0.1, 2.5, 0.1]
             input_fusion=False
     ):
         if adaptive_pose_thres:
-            adaptive_pose_thres = [2., 0.1, 2.5, 0.1]
+            adaptive_pose_thres = [1, 0.1, 1.7, 0.15]
         self.metric = metric
         self.max_iou_dist = max_iou_dist
         self.max_age = max_age
@@ -163,11 +163,29 @@ class Tracker:
         """
         self.frame_num = frame_num
 
+        visible_entropy = [d.entrophy for d in visible_detections]
+        infrared_entrophy = [d.entrophy for d in infrared_detections]
+
         # Run matching cascade.  # 对可见光、红外分别进行轨迹与检测目标的级联匹配
-        visible_matches, visible_unmatched_tracks, visible_unmatched_detections = self._match_v1(visible_detections,
+        if not visible_entropy:
+            visible_matches, visible_unmatched_tracks, visible_unmatched_detections = self._match(visible_detections,
+                                                                                                     'visible')
+        elif min(visible_entropy) < 6.6:
+            visible_matches, visible_unmatched_tracks, visible_unmatched_detections = self._match_v2(visible_detections,
                                                                                               'visible')
-        infrared_matches, infrared_unmatched_tracks, infrared_unmatched_detections = self._match_v1(infrared_detections,
+        else:
+            visible_matches, visible_unmatched_tracks, visible_unmatched_detections = self._match(visible_detections,
+                                                                                                  'visible')
+
+        if not infrared_entrophy:
+            infrared_matches, infrared_unmatched_tracks, infrared_unmatched_detections = self._match(
+                infrared_detections, 'infrared')
+        elif min(infrared_entrophy) < 6.:
+            infrared_matches, infrared_unmatched_tracks, infrared_unmatched_detections = self._match_v2(infrared_detections,
                                                                                                  'infrared')
+        else:
+            infrared_matches, infrared_unmatched_tracks, infrared_unmatched_detections = self._match(
+                infrared_detections, 'infrared')
 
         # Update track set.
         # #1.1、匹配更新视觉、位置特征
@@ -332,9 +350,9 @@ class Tracker:
             confirmed_tracks = [i for i, t in enumerate(self.visible_tracks) if t.is_confirmed()]
             unconfirmed_tracks = [i for i, t in enumerate(self.visible_tracks) if not t.is_confirmed()]
 
-            confirmed_paired_tracks = [i for i, t in enumerate(self.visible_tracks) if t.is_confirmed()and t.id not in self.single_visible_ids]
-            confirmed_single_tracks = [i for i, t in enumerate(self.visible_tracks) if t.is_confirmed()and t.id in self.single_visible_ids]
-            #
+            # confirmed_paired_tracks = [i for i, t in enumerate(self.visible_tracks) if t.is_confirmed()and t.id not in self.single_visible_ids]
+            # confirmed_single_tracks = [i for i, t in enumerate(self.visible_tracks) if t.is_confirmed()and t.id in self.single_visible_ids]
+
             # # Associate confirmed tracks using appearance features.  第一级匹配，使用外观特征
             # matches_a_, unmatched_tracks_a_, unmatched_detections_ = linear_assignment.matching_cascade(
             #     gated_metric,
@@ -344,7 +362,7 @@ class Tracker:
             #     detections,
             #     confirmed_paired_tracks,
             # )
-            # #
+            #
             # unmatched_tracks_a = unmatched_tracks_a_ + confirmed_single_tracks
 
             matches_a, unmatched_tracks_a, unmatched_detections = linear_assignment.matching_cascade(
@@ -390,7 +408,7 @@ class Tracker:
             #                            t.is_confirmed() and t.id not in self.single_infrared_ids]
             # confirmed_single_tracks = [i for i, t in enumerate(self.infrared_tracks) if
             #                            t.is_confirmed() and t.id in self.single_infrared_ids]
-            #
+
             # # Associate confirmed tracks using appearance features.  第一级匹配，使用外观特征
             # matches_a_, unmatched_tracks_a_, unmatched_detections_ = linear_assignment.matching_cascade(
             #     gated_metric,
@@ -401,6 +419,7 @@ class Tracker:
             #     confirmed_paired_tracks,
             # )
             # unmatched_tracks_a = unmatched_tracks_a_ + confirmed_single_tracks
+
             matches_a, unmatched_tracks_a, unmatched_detections = linear_assignment.matching_cascade(
                 gated_metric,
                 self.metric.matching_threshold,
@@ -433,7 +452,7 @@ class Tracker:
             unmatched_tracks = list(set(unmatched_tracks_a + unmatched_tracks_b))
             return matches, unmatched_tracks, unmatched_detections
 
-    def _match_v1(self, detections, modality):
+    def _match_v1(self, detections, modality):  # deep match additionally
         def gated_metric(tracks, dets, track_indices, detection_indices):
             features = np.array([dets[i].feat for i in detection_indices])  # feat:det.feat
             targets = np.array([tracks[i].id for i in track_indices])  # targets:track.id
@@ -466,7 +485,7 @@ class Tracker:
             # # Associate confirmed tracks using appearance features.  第一级匹配，使用外观特征
             matches_a_, unmatched_tracks_a_, unmatched_detections_ = linear_assignment.matching_cascade(
                 gated_metric,
-                self.metric.matching_threshold+0.02,
+                self.metric.matching_threshold,
                 self.max_age,
                 self.visible_tracks,
                 detections,
@@ -525,13 +544,14 @@ class Tracker:
             # Associate confirmed tracks using appearance features.  第一级匹配，使用外观特征
             matches_a_, unmatched_tracks_a_, unmatched_detections_ = linear_assignment.matching_cascade(
                 gated_metric,
-                self.metric.matching_threshold+0.02,
+                self.metric.matching_threshold,
                 self.max_age,
                 self.infrared_tracks,
                 detections,
                 confirmed_paired_tracks,
             )
             unmatched_tracks_a = unmatched_tracks_a_ + confirmed_single_tracks
+
             matches_a, unmatched_tracks_a, unmatched_detections = linear_assignment.matching_cascade(
                 gated_metric,
                 self.metric.matching_threshold,
@@ -562,6 +582,190 @@ class Tracker:
             matches = matches_a + matches_b + matches_a_
             unmatched_tracks = list(set(unmatched_tracks_a + unmatched_tracks_b))
             return matches, unmatched_tracks, unmatched_detections
+
+
+    def _match_v2(self, detections, modality):   # pos match additionally
+        def gated_metric(tracks, dets, track_indices, detection_indices):
+            features = np.array([dets[i].feat for i in detection_indices])  # feat:det.feat
+            targets = np.array([tracks[i].id for i in track_indices])  # targets:track.id
+            cost_matrix = self.metric.distance(features, targets)
+            cost_matrix = linear_assignment.gate_cost_matrix(
+                cost_matrix,
+                tracks,
+                dets,
+                track_indices,
+                detection_indices,
+                self.mc_lambda,
+            )
+
+            return cost_matrix
+
+        if modality == 'visible':
+            # Split track set into confirmed and unconfirmed tracks.
+            confirmed_tracks = [i for i, t in enumerate(self.visible_tracks) if t.is_confirmed()]
+            unconfirmed_tracks = [i for i, t in enumerate(self.visible_tracks) if not t.is_confirmed()]
+
+            confirmed_paired_tracks = [i for i, t in enumerate(self.visible_tracks) if
+                                       t.is_confirmed()
+                                       and t.id not in self.single_visible_ids]
+                                       # and t.pair_time_since_update <= 2]
+            confirmed_single_tracks = [i for i, t in enumerate(self.visible_tracks) if
+                                       t.is_confirmed() and
+                                       t.id in self.single_visible_ids]
+                                       # or t.pair_time_since_update > 2)]
+            #
+            # # Associate confirmed tracks using appearance features.  第一级匹配，使用pos特征
+            matches_a_, unmatched_tracks_a_, unmatched_detections_ = linear_assignment.matching_cascade(
+                iou_matching.iou_cost,
+                self.max_iou_dist-0.4,
+                self.max_age,
+                self.visible_tracks,
+                detections,
+                confirmed_paired_tracks,
+            )
+
+            unmatched_tracks_a = unmatched_tracks_a_ + confirmed_single_tracks
+
+            matches_a, unmatched_tracks_a, unmatched_detections = linear_assignment.matching_cascade(
+                gated_metric,
+                self.metric.matching_threshold,
+                self.max_age,
+                self.visible_tracks,
+                detections,
+                unmatched_tracks_a,
+                unmatched_detections_
+            )
+
+            # Associate remaining tracks together with unconfirmed tracks using IOU.  第二级匹配，使用交并比
+            # 备选tracks：unconfirm（检测过少，未形成）+第一轮unmatch中上一frame更新仅一轮的轨迹
+            iou_track_candidates = unconfirmed_tracks + [
+                k for k in unmatched_tracks_a if self.visible_tracks[k].time_since_update == 1
+            ]  # 确定无缘的轨迹：第一轮unmatch且之前frame已经unmatch的轨迹
+            unmatched_tracks_a = [
+                k for k in unmatched_tracks_a if self.visible_tracks[k].time_since_update != 1
+            ]
+
+            matches_b, unmatched_tracks_b, unmatched_detections = linear_assignment.min_cost_matching(
+                iou_matching.iou_cost,
+                self.max_iou_dist,
+                self.visible_tracks,
+                detections,
+                iou_track_candidates,
+                unmatched_detections,
+            )
+
+            matches = matches_a + matches_b + matches_a_
+            unmatched_tracks = list(set(unmatched_tracks_a + unmatched_tracks_b))
+            return matches, unmatched_tracks, unmatched_detections
+
+        elif modality == 'infrared':
+            # Split track set into confirmed and unconfirmed tracks.
+            confirmed_tracks = [i for i, t in enumerate(self.infrared_tracks) if t.is_confirmed()]
+            unconfirmed_tracks = [i for i, t in enumerate(self.infrared_tracks) if not t.is_confirmed()]
+
+            # Associate confirmed tracks using appearance features.  第一级匹配，使用外观特征
+            confirmed_paired_tracks = [i for i, t in enumerate(self.infrared_tracks) if
+                                       t.is_confirmed()
+                                       and t.id not in self.single_infrared_ids]
+                                       # and t.pair_time_since_update <= 2]
+            confirmed_single_tracks = [i for i, t in enumerate(self.infrared_tracks) if
+                                       t.is_confirmed() and
+                                       t.id in self.single_infrared_ids]
+                                        # or t.pair_time_since_update > 2)]
+
+            # Associate confirmed tracks using appearance features.  第一级匹配，使用外观特征
+            matches_a_, unmatched_tracks_a_, unmatched_detections_ = linear_assignment.matching_cascade(
+                iou_matching.iou_cost,
+                self.max_iou_dist-0.3,
+                self.max_age,
+                self.infrared_tracks,
+                detections,
+                confirmed_paired_tracks,
+            )
+            unmatched_tracks_a = unmatched_tracks_a_ + confirmed_single_tracks
+
+            matches_a, unmatched_tracks_a, unmatched_detections = linear_assignment.matching_cascade(
+                gated_metric,
+                self.metric.matching_threshold,
+                self.max_age,
+                self.infrared_tracks,
+                detections,
+                unmatched_tracks_a,
+                unmatched_detections_
+            )
+            # Associate remaining tracks together with unconfirmed tracks using IOU.  第二级匹配，使用交并比
+            # 备选tracks：unconfirm（检测过少，未形成）+第一轮unmatch中上一frame更新仅一轮的轨迹
+            iou_track_candidates = unconfirmed_tracks + [
+                k for k in unmatched_tracks_a if self.infrared_tracks[k].time_since_update == 1
+            ]  # 确定无缘的轨迹：第一轮unmatch且之前frame已经unmatch的轨迹
+            unmatched_tracks_a = [
+                k for k in unmatched_tracks_a if self.infrared_tracks[k].time_since_update != 1
+            ]
+
+            matches_b, unmatched_tracks_b, unmatched_detections = linear_assignment.min_cost_matching(
+                iou_matching.iou_cost,
+                self.max_iou_dist,
+                self.infrared_tracks,
+                detections,
+                iou_track_candidates,
+                unmatched_detections,
+            )
+
+            matches = matches_a + matches_b + matches_a_
+            unmatched_tracks = list(set(unmatched_tracks_a + unmatched_tracks_b))
+            return matches, unmatched_tracks, unmatched_detections
+
+
+    def _match_v3(self, detections, modality):   # pos match additionally
+        def gated_metric(tracks, dets, track_indices, detection_indices):
+            features = np.array([dets[i].feat for i in detection_indices])  # feat:det.feat
+            targets = np.array([tracks[i].id for i in track_indices])  # targets:track.id
+            cost_matrix = self.metric.distance(features, targets)
+            cost_matrix = linear_assignment.gate_cost_matrix(
+                cost_matrix,
+                tracks,
+                dets,
+                track_indices,
+                detection_indices,
+                self.mc_lambda,
+            )
+
+            return cost_matrix
+
+        if modality == 'visible':
+            # Split track set into confirmed and unconfirmed tracks.
+            confirmed_tracks = [i for i, t in enumerate(self.visible_tracks) if t.is_confirmed()]
+            unconfirmed_tracks = [i for i, t in enumerate(self.visible_tracks) if not t.is_confirmed()]
+
+            matches_b, unmatched_tracks_b, unmatched_detections = linear_assignment.min_cost_matching(
+                iou_matching.iou_cost,
+                self.max_iou_dist,
+                self.visible_tracks,
+                detections,
+                confirmed_tracks+unconfirmed_tracks,
+            )
+
+            matches = matches_b
+            unmatched_tracks = unmatched_tracks_b
+            return matches, unmatched_tracks, unmatched_detections
+
+        elif modality == 'infrared':
+            confirmed_tracks = [i for i, t in enumerate(self.infrared_tracks) if t.is_confirmed()]
+            unconfirmed_tracks = [i for i, t in enumerate(self.infrared_tracks) if not t.is_confirmed()]
+
+            matches_b, unmatched_tracks_b, unmatched_detections = linear_assignment.min_cost_matching(
+                iou_matching.iou_cost,
+                self.max_iou_dist,
+                self.infrared_tracks,
+                detections,
+                confirmed_tracks + unconfirmed_tracks,
+            )
+
+            matches = matches_b
+            unmatched_tracks = unmatched_tracks_b
+            return matches, unmatched_tracks, unmatched_detections
+
+
 
     def _initiate_track(self, detection, modality):
         if modality == 'visible':
@@ -640,93 +844,30 @@ class Tracker:
                     matches.remove(m)
 
         # 输出管理2：增加匹配轨迹对，删除已匹配轨迹,！！！！！！！！！！！！！！！！可优化
-        vi_in_matches = [t[0] for t in matches]
-        ir_in_matches = [t[1] for t in matches]
-        p_ids = copy.deepcopy(self.paired_crossmodel_ids)
-        remove_pairs = []
-        # for m in matches:
-        #     if m[0] in [p[0] for p in self.paired_crossmodel_ids]:
-        #         remove_pairs.append(p_ids[[p[0] for p in self.paired_crossmodel_ids].index(m[0])])
+        # vi_in_matches = [t[0] for t in matches]
+        # ir_in_matches = [t[1] for t in matches]
+        # p_ids = copy.deepcopy(self.paired_crossmodel_ids)
+        # remove_pairs = []
+        # for m in p_ids:
+        #     if m[0] in vi_in_matches:
+        #         remove_pairs.append(matches[vi_in_matches.index(m[0])])
         #         continue
-        #     elif m[1] in [p[1] for p in self.paired_crossmodel_ids]:
-        #         remove_pairs.append(p_ids[[p[1] for p in self.paired_crossmodel_ids].index(m[1])])
-
+        #     elif m[1] in ir_in_matches:
+        #         remove_pairs.append(matches[ir_in_matches.index(m[1])])
+        #
+        # remove_pairs = list(set(remove_pairs))
         # for m in remove_pairs:
-            # self.paired_crossmodel_ids.remove(m)
-
-        for m in p_ids:
-            if m[0] in vi_in_matches:
-                remove_pairs.append(matches[vi_in_matches.index(m[0])])
-                continue
-            elif m[1] in ir_in_matches:
-                remove_pairs.append(matches[ir_in_matches.index(m[1])])
-
-        remove_pairs = list(set(remove_pairs))
-        # deleted = []
-        for m in remove_pairs:
-            matches.remove(m)
-            # if m in deleted:
-            #     continue
-            # if (m[0] in [i[0] for i in p_ids]) and (m[1] not in [i[1] for i in p_ids]):
-            #     # ir发生切换
-            #     id1 = m[1]
-            #     id2_ = [i[0] for i in p_ids].index(m[0])
-            #     id2 = p_ids[id2_][1]
-            #     self.replace_infrared_tracks(id1, id2)
-            # elif (m[0] not in [i[0] for i in p_ids]) and (m[1] in [i[1] for i in p_ids]):
-            #     # vi发生切换
-            #     id1 = m[0]
-            #     id2_ = [i[1] for i in p_ids].index(m[1])
-            #     id2 = p_ids[id2_][0]
-            #     self.replace_visible_tracks(id1, id2)
-            #
-            # elif (m[0] in [i[0] for i in p_ids]) and (m[1] in [i[1] for i in p_ids]):
-            #     # 发生轨迹互换：信置信度更大的模态：
-            #     # 置信度衡量：time since update？
-            #     v_id1=m[0]
-            #     v_id2_ = [i[1] for i in p_ids].index(m[1])
-            #     v_id2 = p_ids[v_id2_][0]
-            #     i_id1 = m[1]
-            #     i_id2_ = [i[0] for i in p_ids].index(m[0])
-            #     i_id2 = p_ids[i_id2_][1]
-            #
-            #     v_t1, v_t2 = self.find_visible_track(v_id1), self.find_visible_track(v_id2)
-            #     i_t1, i_t2 = self.find_infrared_track(i_id1), self.find_infrared_track(i_id2)
-            #     if v_t1.time_since_update +v_t2.time_since_update>i_t1.time_since_update+i_t1.time_since_update:
-            #         self.replace_visible_tracks(v_id1, v_id2)
-            #     else:
-            #         self.replace_infrared_tracks(i_id1, i_id2)
-            #
-            #     if (v_id2, i_id2) in remove_pairs:
-            #         deleted.append((v_id2, i_id2))
-
-            # self.single_visible_ids.append(m[0])
-            # self.single_visible_ids = list(set(self.single_visible_ids))
-            # self.single_infrared_ids.append(m[1])
-            # self.single_infrared_ids = list(set(self.single_infrared_ids))
-            # self.paired_crossmodel_ids.remove(m)
-
-        #     if (m_old[0] in vi_in_matches) and (m_old[1] not in ir_in_matches):
-        #         # new track id换成 old id， old track 删除，
-        #         m_new = matches[vi_in_matches==m_old[0]]
-        #         matches.remove(m_new)
-        #         # self.find_infrared_track(m_old[1]).state=TrackState.Deleted
-        #         # self.find_infrared_track(m_new[1]).id = m_old[1]
-        #     elif (m_old[0] not in vi_in_matches) and (m_old[1] in ir_in_matches):
-        #         m_new = matches[ir_in_matches == m_old[1]]
-        #         matches.remove(m_new)
-
-        # self.find_visible_track(m_old[0]).state = TrackState.Deleted
-        # self.find_visible_track(m_new[0]).id = m_old[0]
-
-            # if m not in self.paired_crossmodel_ids:
-            #     if m[0] in vi_in_matches:
-            #         self.find_infrared_track(m[1]).time_since_update += 1
-            #     elif m[1] in ir_in_matches:
-            #         self.find_visible_track(m[0]).time_since_update += 1
-
-        self.paired_crossmodel_ids = list(set(matches + self.paired_crossmodel_ids))
+        #     matches.remove(m)
+        # self.paired_crossmodel_ids = list(set(matches + self.paired_crossmodel_ids))
         # print('after new match', self.paired_crossmodel_ids)
+
+        self.paired_crossmodel_ids, exchange = self.update_p_t(self.paired_crossmodel_ids, matches)
+        # print(self.paired_crossmodel_ids, exchange)
+        # TODO exchange id
+        # for i in exchange[0]:
+        #     self.exchange_ids(i, 'visible')
+        # for i in exchange[1]:
+        #     self.exchange_ids(i, 'infrared')
 
         for i in self.paired_crossmodel_ids:
             if i[0] in self.single_visible_ids:
@@ -763,15 +904,15 @@ class Tracker:
         infrared_features = np.array(infrared_features)
 
         if feat == 'pos':  # adjust pos based on global bias/icp algorithm
-            if np.mod(self.frame_num, 10) == 0 or self.paired_bias_set == []:
+            if np.mod(self.frame_num, 10) == 0 or len(self.paired_bias_set) <= 5:
                 self.bias_score_ema()
                 pose, score = self.ps_bbox_translation(all_visible_features_, all_infrared_features)
                 pose, score = self.best_bias()
                 score = 1-score
                 if self.adaptive_pose_thres:  # TODO pose-params
-                    self.pos_track_dist = max(score * self.adaptive_pose_thres[0] + self.adaptive_pose_thres[1], 0.4)
+                    self.pos_track_dist = max(score * self.adaptive_pose_thres[0] + self.adaptive_pose_thres[1], 0.6)
                     self.pair_delete_pos_thres = \
-                        max(score * self.adaptive_pose_thres[2] + self.adaptive_pose_thres[3], 0.5)
+                        max(score * self.adaptive_pose_thres[2] + self.adaptive_pose_thres[3], 0.8)
                     print('dists:', score, self.pos_track_dist, self.pair_delete_pos_thres)
             else:
                 pose, _ = self.best_bias()
@@ -806,6 +947,7 @@ class Tracker:
         prev_N = {n for (m, n) in P_t_prev}
         Q_M = {m for (m, n) in Q_t}
         Q_N = {n for (m, n) in Q_t}
+        exchange=[set(), set()]
 
         # 保留策略1的匹配对
         P_retained = set()
@@ -838,13 +980,18 @@ class Tracker:
                     if m_in_prev_M:
                         # 找M中的m对应的旧对
                         pair_m = next((p for p in P_t_prev if p[0] == m), None)
+                        if self.find_visible_track(m).conf > 0.7:
+                            exchange[1].add((pair_m[1], q_pair[1]))
                         if pair_m in P_retained:
                             to_remove.add(pair_m)
                     if n_in_prev_N:
                         # 找N中的n对应的旧对
                         pair_n = next((p for p in P_t_prev if p[1] == n), None)
+                        if self.find_infrared_track(n).conf > 0.7:
+                            exchange[0].add((pair_n[0], q_pair[0]))
                         if pair_n in P_retained:
                             to_remove.add(pair_n)
+
                     # 删除旧对并新增当前对
                     P_t -= to_remove
                     P_t.add(q_pair)
@@ -854,6 +1001,12 @@ class Tracker:
                     pair_m = next((p for p in P_t_prev if p[0] == m), None)
                     pair_n = next((p for p in P_t_prev if p[1] == n), None)
                     if pair_m != pair_n and pair_m is not None and pair_n is not None:
+                        # decide to exchange which modality pairs
+                        # conf_m, conf_n = self.find_visible_track(m).conf, self.find_visible_track(m).conf
+                        # if conf_m>conf_n:
+                        #     exchange[1].add((pair_m[1], q_pair[1]))
+                        # else:
+                        #     exchange[0].add((pair_n[0], q_pair[0]))
                         to_remove = set()
                         if pair_m in P_retained:
                             to_remove.add(pair_m)
@@ -861,7 +1014,83 @@ class Tracker:
                             to_remove.add(pair_n)
                         P_t -= to_remove
                         P_t.add(q_pair)
-        return P_t
+        return P_t, exchange
+
+    def update_p_t_v1(self, P_t_prev, Q_t):
+        # 策略1：保留符合条件的旧匹配对
+        prev_M = {m for (m, n) in P_t_prev}
+        prev_N = {n for (m, n) in P_t_prev}
+        Q_M = {m for (m, n) in Q_t}
+        Q_N = {n for (m, n) in Q_t}
+        exchange=[set(), set()]
+
+        # 保留策略1的匹配对
+        P_retained = set()
+        for pair in P_t_prev:
+            m_p, n_p = pair
+            # 条件：当前对存在于Q_t中，或者两个元素均不在Q_t的任何元素中出现
+            if pair in Q_t or (m_p not in Q_M and n_p not in Q_N):
+                P_retained.add(pair)
+
+        P_t = set(P_retained)  # 初始化P_t为策略1保留的集合
+
+        # 处理Q_t中的每个元素对
+        for q_pair in Q_t:
+            m, n = q_pair
+            if q_pair in P_retained:
+                continue  # 已由策略1处理，跳过
+
+            # 检查元素在旧对中的存在情况
+            m_in_prev_M = m in prev_M
+            n_in_prev_N = n in prev_N
+
+            # 策略2：两个元素均未在旧对中出现
+            if not m_in_prev_M and not n_in_prev_N:
+                P_t.add(q_pair)
+            else:
+                # 策略3：其中一个元素存在，另一个不存在
+                # if (m_in_prev_M and not n_in_prev_N) or (not m_in_prev_M and n_in_prev_N):
+                #     to_remove = set()
+                #     # 找到旧对中包含m或n的对
+                #     if m_in_prev_M:
+                #         # 找M中的m对应的旧对
+                #         pair_m = next((p for p in P_t_prev if p[0] == m), None)
+                #         if self.find_visible_track(m).conf > 0.7:
+                #             exchange[1].add(q_pair)
+                #         if pair_m in P_retained:
+                #             to_remove.add(pair_m)
+                #     if n_in_prev_N:
+                #         # 找N中的n对应的旧对
+                #         pair_n = next((p for p in P_t_prev if p[1] == n), None)
+                #         if self.find_infrared_track(n).conf > 0.7:
+                #             exchange[0].add((pair_n[0], q_pair[0]))
+                #         if pair_n in P_retained:
+                #             to_remove.add(pair_n)
+                #
+                #     # 删除旧对并新增当前对
+                #     P_t -= to_remove
+                #     P_t.add(q_pair)
+                # 策略4：两个元素分别在旧的不同对中
+                if m_in_prev_M and n_in_prev_N:
+                    # 查找旧对中的m对应的对和n对应的对
+                    pair_m = next((p for p in P_t_prev if p[0] == m), None)
+                    pair_n = next((p for p in P_t_prev if p[1] == n), None)
+                    if pair_m != pair_n and pair_m is not None and pair_n is not None:
+                        # decide to exchange which modality pairs
+                        # conf_m, conf_n = self.find_visible_track(m).conf, self.find_visible_track(m).conf
+                        # if conf_m>conf_n:
+                        #     exchange[1].add((pair_m[1], q_pair[1]))
+                        # else:
+                        #     exchange[0].add((pair_n[0], q_pair[0]))
+                        to_remove = set()
+                        if pair_m in P_retained:
+                            to_remove.add(pair_m)
+                        if pair_n in P_retained:
+                            to_remove.add(pair_n)
+                        P_t -= to_remove
+                        P_t.add(q_pair)
+        return P_t, exchange
+
 
     def delete_time_adjust(self):
         def iou(bbox1, bbox2):
@@ -913,7 +1142,7 @@ class Tracker:
             t_pairs = copy.deepcopy(t_pairs_)
             vi_feat = copy.deepcopy(self.find_visible_track(t_pairs[0]).to_xywh())
             ir_feat = self.find_infrared_track(t_pairs[1]).to_xywh()
-            bias,_ = self.best_bias()
+            bias, _ = self.best_bias()
             vi_feat[0] = vi_feat[0] * bias[2] + bias[0]
             vi_feat[1] = vi_feat[1] * bias[3] + bias[1]
             vi_feat[2] = vi_feat[2] * bias[2]
@@ -945,6 +1174,8 @@ class Tracker:
                     self.paired_crossmodel_ids.remove(t_pairs)
                     self.single_visible_ids.append(t_pairs[0])
                     self.single_infrared_ids.append(t_pairs[1])
+                    # if t_pairs == (1, 3):
+                    #     print("deleted", distances, ir_time_since_update, vi_time_since_update)
                 # if self.frame_num >= 177:
                 #     # print('pair', t_pairs[1], ir_time_since_update, self.find_infrared_track(t_pairs[1]).time_since_update)
                 #     print('7', self.infrared_tracks[1].pair_time_since_update, self.infrared_tracks[1].time_since_update)
@@ -994,7 +1225,7 @@ class Tracker:
             elif t2.hits > t1.hits:
                 t1.time_since_update += 1
                 return
-            # step4: score:remain higher
+            # step4: higher score
             if t1.conf_ema > t2.conf_ema:
                 t1.time_since_update += 1
                 return
@@ -1010,7 +1241,11 @@ class Tracker:
         for i, t1 in enumerate(all_visible_tracks):
             for j, t2 in enumerate(all_visible_tracks[i + 1:]):
                 t_iou = iou(t1.to_xywh(), t2.to_xywh())
-                if t_iou > self.soft_nms_thres:
+                # smaller s, smaller thres:
+                # s1, s2 = t1.to_xywh()[2]*t1.to_xywh()[3], t2.to_xywh()[2]*t2.to_xywh()[3]
+                # thres_fix = np.exp((-s1-s2)/3e2) if np.exp((-s1-s2)/3e2)>0.1 else 0
+                # print('s:',thres_fix, t1.id,s1,t2.id, s2)
+                if t_iou > self.soft_nms_thres:# - thres_fix:
                     nms(t1, t2, paired_visible_ids)
 
         for i, t1 in enumerate(all_infrared_tracks):
@@ -1156,6 +1391,18 @@ class Tracker:
                     v_vel_mean, np.array([best_bias[2], best_bias[3], best_bias[2] / best_bias[3], best_bias[3]]))
                 infrared_track_.mean[0:4] = infrared_track_.match_mean[0:4] + fkf_vel * self.dt
                 infrared_track_.mean[4:] = fkf_vel
+            # else: # 强耦合方案
+            #     i_vel_hat = np.divide(
+            #         i_vel_mean, np.array([best_bias[2], best_bias[3], best_bias[2] / best_bias[3], best_bias[3]]))
+            #     v_fkf_vel = (i_conf_ * i_vel_hat + v_conf_ * v_vel_mean) / (i_conf_ + v_conf_)
+            #     visible_track_.match_mean[0:4] = visible_track_.match_mean[0:4] + v_fkf_vel * self.dt
+            #     visible_track_.match_mean[4:] = v_fkf_vel
+            #     v_vel_hat = np.multiply(
+            #         v_vel_mean, np.array([best_bias[2], best_bias[3], best_bias[2] / best_bias[3], best_bias[3]]))
+            #     i_fkf_vel = (i_conf_ * i_vel_mean + v_conf_ * v_vel_hat) / (i_conf_ + v_conf_)
+            #     infrared_track_.match_mean[0:4] = infrared_track_.match_mean[0:4] + i_fkf_vel * self.dt
+            #     infrared_track_.match_mean[4:] = i_fkf_vel
+
 
         # 弱耦合方案：仅在不同时更新
         if mode == FKFMode.miss2:
@@ -1222,9 +1469,9 @@ class Tracker:
             s_vi = t_vi.bbox[2] * (t_vi.bbox[3] ** 2) * best_bias[2] * best_bias[3]
             s_ir = t_ir.bbox[2] * (t_ir.bbox[3] ** 2)
             v_vel_mean, i_vel_mean = copy.deepcopy(t_vi.match_mean[4:]), copy.deepcopy(t_ir.match_mean[4:])
-            if s_ir > 2 * s_vi:
+            if s_ir > 1.5 * s_vi:
                 mode == FKFMode.miss_vi
-            elif s_vi > 2 * s_ir:
+            elif s_vi > 1.5 * s_ir:
                 mode == FKFMode.miss_ir
             # mean_vi, mean_ir = t_vi.to_xywh(), t_ir.to_xywh()
             # mean_vi[2] /= mean_vi[3]
@@ -1307,7 +1554,6 @@ class Tracker:
         elif mode == FKFMode.miss2:
             pass
 
-
         return
 
 
@@ -1381,6 +1627,41 @@ class Tracker:
         for t in self.infrared_tracks:
             if t.id == id:
                 return t
+
+    def exchange_ids(self, pair, modality):
+        def find_and_swap_tracks(obj_list, id1, id2):
+            id_to_index = {obj.id: i for i, obj in enumerate(obj_list)}
+            index1 = id_to_index.get(id1)
+            index2 = id_to_index.get(id2)
+            if index1 is not None and index2 is not None:
+                obj_list[index1], obj_list[index2] = obj_list[index2], obj_list[index1]
+                obj_list[index1].id, obj_list[index2].id = obj_list[index2].id, obj_list[index1].id
+                return True
+            else:
+                return False
+
+        old_paired_ids = copy.deepcopy(self.paired_crossmodel_ids)
+        if modality == 'visible':
+            find_and_swap_tracks(self.visible_tracks, pair[0], pair[1])
+            for i, p in enumerate(old_paired_ids):
+                if p[0] == pair[0]:
+                    self.paired_crossmodel_ids.add((pair[1], p[1]))
+                    self.paired_crossmodel_ids.remove(p)
+                elif p[0] == pair[1]:
+                    self.paired_crossmodel_ids.add((pair[0], p[1]))
+                    self.paired_crossmodel_ids.remove(p)
+        if modality == 'infrared':
+            find_and_swap_tracks(self.infrared_tracks, pair[0], pair[1])
+            for i, p in enumerate(old_paired_ids):
+                if p[1] == pair[0]:
+                    self.paired_crossmodel_ids.add((p[0], pair[1]))
+                    self.paired_crossmodel_ids.remove(p)
+                elif p[1] == pair[1]:
+                    self.paired_crossmodel_ids.add((p[0], pair[0]))
+                    self.paired_crossmodel_ids.remove(p)
+
+            # exchange id in pairs lists
+        pass
 
     def replace_visible_tracks(self, id1, id2):
         t1 = self.find_visible_track(id1)
@@ -1708,12 +1989,12 @@ class Tracker:
 
         init_points = self.sample_from_gaussians(partical_num, bounds, init_mean)
 
-        if len(source_) < 3 or len(target_) < 3:
-            return init_mean, 0.4
+        if len(source_) < 2 or len(target_) < 2:
+            return init_mean, 0.8
 
         source = copy.deepcopy(source_)
 
-        options = {'c1': 3, 'c2': 0.4, 'w': 0.8}
+        options = {'c1': 3., 'c2': 0.4, 'w': 0.8}
         optimized_rosenbrock = lambda x: rosenbrock(x, source, target_)
 
         # 创建全局最优 PSO 优化器
@@ -1726,8 +2007,9 @@ class Tracker:
         # # plot_contour(pos_history)
         # plt.show()
 
-        # dist, paired_num_ = paired_num(pos, source, target_)  # 修改
-        self.paired_bias_set.append([pos, 1 - cost])  # 修改
+        dist, paired_num_ = paired_num(pos, source, target_)  # 修改
+        self.paired_bias_set.append([pos, (1 - cost/np.log10(paired_num_))])  # 修改
+        # self.paired_bias_set.append([pos, (1 - cost)])
 
         return pos, cost
 

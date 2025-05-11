@@ -164,14 +164,19 @@ class StrongSort(object):
         self.cmc = get_cmc_method('ecc')()
 
         self.frame_count = 0
-        self.modality = 'visible'
-        self.img_path = track_id
+        self.modality = 'infrared'
+        self.subset = 'leftunderbasket'
+
+        if track_all:
+            self.img_path = track_id
+            self.subset = os.path.basename(track_id)
+        else:
+            self.img_path = 'E:/lasher/LasHeR_Unalined_960_0615/seleted/'+self.subset
         self.visible_img_list = get_img_names(self.img_path, self.modality)
         self.visible_img_size = cv2.imread(os.path.join(self.img_path, self.modality, self.visible_img_list[0])).shape
         self.track_all = track_all
-        self.subset = os.path.basename(track_id)
-        self.detects = get_img_dets(self.img_path, self.modality + '/det', '424_Ten_Ien_', 0.4)
-        self.output_path = "../output_tracks/strongsort_424_Ten_Ien/data/" + os.path.basename(self.img_path)
+        self.detects = get_img_dets(self.img_path, self.modality + '/det', '424_woen_', 0.4)
+        self.output_path = "../output_tracks/strongsort_424_woen/data/" + os.path.basename(self.img_path)
 
     @BaseTracker.per_class_decorator
     def update(self, dets: np.ndarray, img: np.ndarray, embs: np.ndarray = None) -> np.ndarray:
@@ -275,8 +280,8 @@ class StrongSort(object):
             cv2.imshow('frame', img)
             cv2.waitKey()
 
-        # save_results(self.frame_count, self.output_path, outputs, self.modality)
-        show_both_result(img, outputs, self.frame_count, self.subset, self.modality)
+        save_results(self.frame_count, self.output_path, outputs, self.modality)
+        # show_both_result(img, outputs, self.frame_count, self.subset, self.modality)
         if len(outputs) > 0:
             return np.concatenate(outputs)
 

@@ -52,9 +52,9 @@ def xyxyn2xyxy(xyxyn, img_shape):
     return xyxy
 
 
-def get_img_dets(root_dir, sub_dir, thres):
+def get_img_dets(root_dir, sub_dir, version, thres):
     # 拼接指定子目录的完整路径
-    target_dir = os.path.join(root_dir, sub_dir, 'det.csv')
+    target_dir = os.path.join(root_dir, sub_dir, version+'det.csv')
     # 从完整文件路径中提取文件名
     result = {}
     with open(target_dir, 'r', newline='', encoding='utf-8') as csvfile:
@@ -372,8 +372,8 @@ class rgbt_ImprAssocTrack(BaseTracker):
         self.visible_img_size = cv2.imread(os.path.join(self.img_path, self.modality, self.visible_img_list[0])).shape
         self.track_all = track_all
         self.subset = os.path.basename(track_id)
-        self.detects = get_img_dets(self.img_path, self.modality + '/det', thres=0.4)
-        self.output_path = "../output_tracks/imprassoc/data/" + os.path.basename(self.img_path)
+        self.detects = get_img_dets(self.img_path, self.modality + '/det', '424_Two_Iwo_', 0.4)
+        self.output_path = "../output_tracks/imprassoc_Two_Iwo/data/" + os.path.basename(self.img_path)
 
     @BaseTracker.on_first_frame_setup
     @BaseTracker.per_class_decorator

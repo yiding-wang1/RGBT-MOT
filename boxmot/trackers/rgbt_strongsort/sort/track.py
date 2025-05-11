@@ -247,12 +247,13 @@ class Track:
         smooth_feat /= np.linalg.norm(smooth_feat)
         self.features = [smooth_feat]
 
-        share_feature = detection.share_feat / np.linalg.norm(detection.share_feat)
-        share_smooth_feat = (
-                self.ema_alpha * self.share_modality_features[-1] + (1 - self.ema_alpha) * share_feature
-        )
-        share_smooth_feat /= np.linalg.norm(share_smooth_feat)
-        self.share_modality_features = [share_smooth_feat]
+        if detection.share_feat is not None:
+            share_feature = detection.share_feat / np.linalg.norm(detection.share_feat)
+            share_smooth_feat = (
+                    self.ema_alpha * self.share_modality_features[-1] + (1 - self.ema_alpha) * share_feature
+            )
+            share_smooth_feat /= np.linalg.norm(share_smooth_feat)
+            self.share_modality_features = [share_smooth_feat]
 
         self.hits += 1
         self.time_since_update = 0

@@ -71,7 +71,7 @@ class RGBT_StrongSort(object):
         max_cos_dist = 0.2
         max_age = 30
         max_iou_dist = 0.9  # ！！！！！！！！！！！！！！！！！
-        self.exp_id = '425_2'
+        self.exp_id = '58_r'
 
         # whether track different model seperately
         self.seperate_track = False
@@ -99,7 +99,7 @@ class RGBT_StrongSort(object):
 
         self.frame_num = 0
         self.total_time = 0
-        self.subset = 'leftunderbasket'
+        self.subset = 'the2ndboyunderbasket'
 
         if track_all:
             self.img_path = track_id
@@ -115,8 +115,8 @@ class RGBT_StrongSort(object):
         self.visible_img_size = cv2.imread(os.path.join(self.img_path, 'visible', self.visible_img_list[0])).shape
         self.infrared_img_size = cv2.imread(os.path.join(self.img_path, 'infrared', self.infrared_img_list[0])).shape
         self.frame_len = len(self.infrared_img_list)
-        self.visible_dets_list = get_img_dets(self.img_path, 'visible/det', '424_Ten_Ien_', thres=0.4)
-        self.infrared_dets_list = get_img_dets(self.img_path, 'infrared/det', '424_Ten_Ien_', thres=0.4)
+        self.visible_dets_list = get_img_dets(self.img_path, 'visible/det', '424_Two_Iwo_', thres=0.4)
+        self.infrared_dets_list = get_img_dets(self.img_path, 'infrared/det', '424_Two_Iwo_', thres=0.4)
 
         self.visualize = not track_all
         self.save_output = track_all
@@ -180,9 +180,12 @@ class RGBT_StrongSort(object):
         infrared_det_ind = infrared_dets[:, 7].astype(int)
 
         # print(f"infrared_bbox={infrared_xyxy}")
-
-
         # extract appearance information for each detection -- visible
+
+        # 实验：图像熵
+        vi_entropies = self.detections_entropy(visible_xyxy, visible_img)
+        ir_entropies = self.detections_entropy(infrared_xyxy, infrared_img)
+
         visible_features = self.model.get_features(visible_xyxy, visible_img)
         if self.pose_only:
             share_visible_features = visible_features
@@ -190,9 +193,10 @@ class RGBT_StrongSort(object):
             share_visible_features = self.get_modality_features_deen_vi(visible_xyxy, visible_img)
         visible_tlwh = xyxy2tlwh(visible_xyxy)
         visible_detections = [
-            Detection(box, conf, cls, det_ind, feat, share_feat) for
-            box, conf, cls, det_ind, feat, share_feat in
-            zip(visible_tlwh, visible_confs, visible_clss, visible_det_ind, visible_features, share_visible_features)
+            Detection(box, conf, cls, det_ind, feat, share_feat, vi_entropy) for
+            box, conf, cls, det_ind, feat, share_feat, vi_entropy in
+            zip(visible_tlwh, visible_confs, visible_clss, visible_det_ind, visible_features
+                , share_visible_features, vi_entropies)
         ]
 
         start_time1 = time.time()  # cmc time
@@ -235,10 +239,10 @@ class RGBT_StrongSort(object):
             share_infrared_features = self.get_modality_features_deen_ir(infrared_xyxy, infrared_img)
         infrared_tlwh = xyxy2tlwh(infrared_xyxy)
         infrared_detections = [
-            Detection(box, conf, cls, det_ind, feat, share_feat) for
-            box, conf, cls, det_ind, feat, share_feat in
-            zip(infrared_tlwh, infrared_confs, infrared_clss, infrared_det_ind, infrared_features,
-                share_infrared_features)
+            Detection(box, conf, cls, det_ind, feat, share_feat, ir_entropy) for
+            box, conf, cls, det_ind, feat, share_feat, ir_entropy in
+            zip(infrared_tlwh, infrared_confs, infrared_clss, infrared_det_ind,
+                infrared_features, share_infrared_features, ir_entropies)
         ]
 
         start_time2 = time.time()  # tracking algorithm time
@@ -308,12 +312,12 @@ class RGBT_StrongSort(object):
             save_both_results(self.frame_num, save_path=self.output_path,
                               visible_outputs=visible_outputs, infrared_outputs=infrared_outputs,
                               paired_tracks=paired_tracks, separate_tracking=self.seperate_track, time_=self.total_time)
-            show_both_result(visible_outputs, infrared_outputs,
-                             copy.deepcopy(visible_img), copy.deepcopy(infrared_img),
-                             self.frame_num, self.subset)
-            show_both_det(visible_xyxy, infrared_xyxy,
-                          copy.deepcopy(visible_img), copy.deepcopy(infrared_img),
-                          self.frame_num, self.subset, visible_confs, infrared_confs)
+            # show_both_result(visible_outputs, infrared_outputs,
+            #                  copy.deepcopy(visible_img), copy.deepcopy(infrared_img),
+            #                  self.frame_num, self.subset)
+            # show_both_det(visible_xyxy, infrared_xyxy,
+            #               copy.deepcopy(visible_img), copy.deepcopy(infrared_img),
+            #               self.frame_num, self.subset, visible_confs, infrared_confs)
         return np.array([])
 
     def get_modality_features_deen_vi(self, modality_xyxys, modality_img):
@@ -413,6 +417,24 @@ class RGBT_StrongSort(object):
     def plot_results(self, orig_img, show_trajectories):
         pass
 
+    def detections_entropy(self, xyxys, img):
+        def _calculate_single_channel_entropy(channel):
+            hist = cv2.calcHist([channel], [0], None, [256], [0, 256])
+            hist = hist / hist.sum()
+            entropy = 0.0
+            for p in hist:
+                if p > 0:
+                    entropy -= p * np.log2(p)
+            return entropy
+
+        entrophys = []
+        h, w = img.shape[:2]
+        for box in xyxys:
+            x1, y1, x2, y2 = box.astype('int')
+            x1, y1, x2, y2 = max(0, x1), max(0, y1), min(w - 1, x2), min(h - 1, y2)
+            crop = cv2.cvtColor(img[y1:y2, x1:x2], cv2.COLOR_BGR2GRAY)
+            entrophys.append(_calculate_single_channel_entropy(crop))
+        return entrophys
 
 def get_img_names(root_dir, sub_dir):
     # 拼接指定子目录的完整路径
@@ -510,7 +532,7 @@ def show_both_result(visible_outputs, infrared_outputs, visible_img, infrared_im
                 thickness
             )
     combined_img = cv2.hconcat([visible_img, infrared_img])
-    save_path = f"./output_imgs_424_3/{subset}/{frame_num}.jpg"
+    save_path = f"./output_imgs_428_i/{subset}/{frame_num}.jpg"
     if not os.path.exists(os.path.dirname(save_path)):
         os.makedirs(os.path.dirname(save_path))
     cv2.imwrite(save_path, combined_img)
@@ -638,7 +660,6 @@ def save_both_results(frame_number, save_path, visible_outputs, infrared_outputs
         i_fi.close()
         p_fi = open(paired_id_path, 'w')
         p_fi.close()
-
 
 
 def xyxyn2xyxy(xyxyn, img_shape):

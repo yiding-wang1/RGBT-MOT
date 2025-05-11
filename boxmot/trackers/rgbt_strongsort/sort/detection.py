@@ -24,12 +24,13 @@ class Detection(object):
 
     """
 
-    def __init__(self, tlwh, conf, cls, det_ind, feat, share_feat):
+    def __init__(self, tlwh, conf, cls, det_ind, feat, share_feat, entrophy):
         self.tlwh = tlwh
         self.conf = conf
         self.cls = cls
         self.det_ind = det_ind
         self.feat = feat
+        self.entrophy = entrophy
         self.share_feat = share_feat
 
     def to_xyah(self):
