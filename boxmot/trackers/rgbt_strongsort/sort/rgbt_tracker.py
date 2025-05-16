@@ -715,8 +715,7 @@ class Tracker:
             unmatched_tracks = list(set(unmatched_tracks_a + unmatched_tracks_b))
             return matches, unmatched_tracks, unmatched_detections
 
-
-    def _match_v3(self, detections, modality):   # pos match additionally
+    def _match_v3(self, detections, modality):   # pos match only
         def gated_metric(tracks, dets, track_indices, detection_indices):
             features = np.array([dets[i].feat for i in detection_indices])  # feat:det.feat
             targets = np.array([tracks[i].id for i in track_indices])  # targets:track.id
@@ -797,12 +796,12 @@ class Tracker:
 
     def crossmodality_match(self):
         # 提取可见光与红外的单模态轨迹
-        confirmed_visible_tracks = [t.id for t in self.visible_tracks if
-                                    t.is_confirmed() and t.id in self.single_visible_ids and t.time_since_update <= 2]
-        confirmed_infrared_tracks = [t.id for t in self.infrared_tracks if
-                                     t.is_confirmed() and t.id in self.single_infrared_ids and t.time_since_update <= 2]
-        unconfirmed_visible_tracks = [t.id for t in self.visible_tracks if t.is_confirmed()]
-        unconfirmed_infrared_tracks = [t.id for t in self.infrared_tracks if t.is_confirmed()]
+        # confirmed_visible_tracks = [t.id for t in self.visible_tracks if
+        #                             t.is_confirmed() and t.id in self.single_visible_ids and t.time_since_update <= 2]
+        # confirmed_infrared_tracks = [t.id for t in self.infrared_tracks if
+        #                              t.is_confirmed() and t.id in self.single_infrared_ids and t.time_since_update <= 2]
+        # unconfirmed_visible_tracks = [t.id for t in self.visible_tracks if t.is_confirmed()]
+        # unconfirmed_infrared_tracks = [t.id for t in self.infrared_tracks if t.is_confirmed()]
         all_visible_tracks = [t.id for t in self.visible_tracks if t.is_confirmed() and t.time_since_update <= 2]
         all_infrared_tracks = [t.id for t in self.infrared_tracks if t.is_confirmed() and t.time_since_update <= 2]
 
@@ -906,7 +905,7 @@ class Tracker:
         if feat == 'pos':  # adjust pos based on global bias/icp algorithm
             if np.mod(self.frame_num, 10) == 0 or len(self.paired_bias_set) <= 5:
                 self.bias_score_ema()
-                pose, score = self.ps_bbox_translation(all_visible_features_, all_infrared_features)
+                _, _ = self.ps_bbox_translation(all_visible_features_, all_infrared_features)
                 pose, score = self.best_bias()
                 score = 1-score
                 if self.adaptive_pose_thres:  # TODO pose-params
@@ -1567,7 +1566,7 @@ class Tracker:
         adjust_features_[:, 3] = adjust_features[:, 3] * pose[3]
         return adjust_features_
 
-    def sample_from_gaussians(self, num_samples, bounds, means, stds=np.array([10, 10, 0.1, 0.1])):
+    def sample_from_gaussians(self, num_samples, bounds, means, stds=np.array([10, 10, 0.1, 0.1])):  # [10,10,0.1,0.1]]
         all_samples = []
         # 遍历四个高斯分布的均值和标准差
         for mean, std in zip(means, stds):
@@ -1575,6 +1574,54 @@ class Tracker:
             samples = np.random.normal(mean, std, num_samples)
             all_samples.append(samples)
         return np.clip(np.array(all_samples).T, bounds[0], bounds[1])
+
+    def sample_n_from_gaussians(self, num_samples, bounds, means, scores, stds=np.array([10, 10, 0.1, 0.1])):
+        # 遍历四个高斯分布的均值和标准差
+        if max(scores)==0:
+            cov = np.diag(stds)
+            samples = np.random.multivariate_normal(
+                mean=means[0],
+                cov=cov,
+                size=num_samples
+            )
+            return np.clip(samples, bounds[0], bounds[1])
+
+        confidences = np.array([len(means)-i for i in range(len(means))])
+        norm_confidences = confidences/sum(confidences)
+
+        # 分配每个点生成的数量（处理整数分配余数）
+        points_per_cluster = (norm_confidences * num_samples).astype(int)
+        remaining = num_samples - points_per_cluster.sum()
+
+        if remaining > 0:
+            max_idx = np.argmax(norm_confidences)
+            points_per_cluster[max_idx] += remaining
+
+        # 处理方差参数
+        variance = np.ones(4) * stds
+
+
+        # 生成每个高斯分布的点集
+        point_cloud = []
+        for i in range(len(means)):
+            n = points_per_cluster[i]
+            if n == 0:
+                continue
+            # 生成协方差矩阵（对角线为方差）
+            cov = np.diag(variance)
+            # 生成多元高斯分布点
+            samples = np.random.multivariate_normal(
+                mean=means[i],
+                cov=cov,
+                size=n
+            )
+            point_cloud.append(samples)
+
+        # 合并点集
+        if point_cloud:
+            return np.clip(np.vstack(point_cloud), bounds[0], bounds[1])
+        else:
+            return np.empty((0, 4))
 
     def ransac_bias(self, num_iterations=10, distance_threshold=0.1, min_points=3):
         best_inliers = []
@@ -1613,6 +1660,17 @@ class Tracker:
             points = np.array([t[0] for t in self.paired_bias_set[-10:]])
             score = np.array([t[1] for t in self.paired_bias_set[-10:]])
             return points[np.argmax(score)], max(score)
+
+    def best_n_bias(self, num):
+        if not self.paired_bias_set:# or max([s[1] for s in self.paired_bias_set])<0.5:
+            return np.array([[0, 0, 1, 1]]), np.array([0.])
+        else:
+            points = np.array([t[0] for t in self.paired_bias_set[-10:]])
+            score = np.array([t[1] for t in self.paired_bias_set[-10:]])
+            top_n_indices = np.argsort(score)[-num:][::-1]
+            top_n_scores = score[top_n_indices]
+            top_n_points = points[top_n_indices]
+            return top_n_points, top_n_scores
 
     def bias_score_ema(self):
         for t in self.paired_bias_set:
@@ -1933,7 +1991,7 @@ class Tracker:
 
         return pos, cost
 
-    def ps_bbox_translation(self, source_, target_, max_iterations=150, partical_num=40):
+    def ps_bbox_translation(self, source_, target_, max_iterations=150, partical_num=40):  # 150,40 ,60x
         """
         Rosenbrock 函数的实现
         :param x: 输入的变量，形状为 (n_particles, dimensions),n*[dx,dy,rx,ry]
@@ -1985,16 +2043,24 @@ class Tracker:
         dimensions = 4
         bounds = (np.array([-250, -40, 0.67, 0.67]), np.array([250, 40, 1.5, 1.5]))
 
-        init_mean, _ = self.best_bias()  # ransac_bias()
-
+        init_mean, _ = self.best_bias()
         init_points = self.sample_from_gaussians(partical_num, bounds, init_mean)
+
+        # init_mean, scores = self.best_n_bias(5)
+        # init_points = self.sample_n_from_gaussians(partical_num, bounds, init_mean, scores)
 
         if len(source_) < 2 or len(target_) < 2:
             return init_mean, 0.8
 
         source = copy.deepcopy(source_)
 
-        options = {'c1': 3., 'c2': 0.4, 'w': 0.8}
+        # options = {'c1': 3., 'c2': 0.4, 'w': 1.}
+        if len(self.paired_bias_set) < 10:
+            options = {'c1': 3.2, 'c2': 0.4, 'w': 0.9}
+        else:
+            options = {'c1': 3, 'c2': 0.4, 'w': 0.8}
+            # max_iterations = 180
+
         optimized_rosenbrock = lambda x: rosenbrock(x, source, target_)
 
         # 创建全局最优 PSO 优化器

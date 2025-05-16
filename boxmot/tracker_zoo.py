@@ -54,6 +54,8 @@ def create_tracker(tracker_type, tracker_config=None, reid_weights=None, device=
         'rgbt_hybridsort':'boxmot.trackers.rgbt_hybridsort.rgbt_hybridsort.RGBT_HybridSort',
         'rgbt_boost': 'boxmot.trackers.boosttrack.boosttrack.BoostTrack',
         'rgbt_imprassoc':'boxmot.trackers.rgbt_imprassoc.rgbt_imprassoctrack.rgbt_ImprAssocTrack',
+        'rgbt_botsort': 'boxmot.trackers.rgbt_botsort.botsort.RGBT_BotSort',
+        'rgbt_ocsort': 'boxmot.trackers.rgbt_ocsort.ocsort.RGBT_OcSort',
     }
 
     # Check if the tracker type exists in the mapping
@@ -73,6 +75,7 @@ def create_tracker(tracker_type, tracker_config=None, reid_weights=None, device=
                         'rgbt_hybridsort',
                         'rgbt_boost',
                         'rgbt_imprassoc',
+                        'rgbt_botsort'
                         ]:
         tracker_args['per_class'] = per_class
         tracker_args.update(reid_args)

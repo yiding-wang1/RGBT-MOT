@@ -180,7 +180,7 @@ class BaseTracker(ABC):
         ), "Unsupported 'dets' dimensions, valid number of dimensions is two"
         assert (
             dets.shape[1] == 6
-        ), "Unsupported 'dets' 2nd dimension lenght, valid lenghts is 6"
+        ), f"Unsupported 'dets' 2nd dimension lenght, valid lenghts is 6, now it's {dets.shape[1]}"
 
     def id_to_color(self, id: int, saturation: float = 0.75, value: float = 0.95) -> tuple:
         """

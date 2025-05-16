@@ -18,6 +18,9 @@ import os
 import csv
 import cv2
 import glob
+import time
+import json
+
 
 
 def infrared_preprocess(image):
@@ -94,10 +97,12 @@ def get_img_dets(root_dir, sub_dir, version, thres):
     return result
 
 
-def save_results(frame_number, save_path, outputs, modality):
+def save_results(frame_number, save_path, outputs, modality, time_):
     if not os.path.exists(os.path.dirname(save_path)):
         os.makedirs(os.path.dirname(save_path))
     visible_path = save_path + '_'+modality+'.txt'
+    fps_path = os.path.dirname(save_path)+'/fps.json'
+
     if frame_number > 1:
         v_fi = open(visible_path, 'a+')
         for x in outputs:
@@ -107,14 +112,25 @@ def save_results(frame_number, save_path, outputs, modality):
                      f"{x1},"
                      f"{y1},"
                      f"{x2-x1},"
-                     f"{y2-y1},1,1,1"
+                     f"{y2-y1},1,"
+                     f"{cls},1"
                      + '\n')
         v_fi.close()
+
+        try:
+            with open(fps_path, 'r+') as t_fi:
+                history_t = json.load(t_fi)
+                history_t = [history_t[0] + time_, history_t[1] + 1]
+                t_fi.seek(0)
+                json.dump(history_t, t_fi)
+                t_fi.truncate()
+        except FileNotFoundError:
+            with open(fps_path, 'w') as t_fi:
+                json.dump([time_, 1.], t_fi)
 
     elif frame_number == 1:  # refresh history records
         v_fi = open(visible_path, 'w')
         v_fi.close()
-
 
 
 class STrack(BaseTrack):
@@ -366,7 +382,7 @@ class rgbt_ImprAssocTrack(BaseTracker):
 
         self.cmc = SOF()
 
-        self.modality = 'infrared'
+        self.modality = 'visible'
         self.img_path = track_id
         self.visible_img_list = get_img_names(self.img_path, self.modality)
         self.visible_img_size = cv2.imread(os.path.join(self.img_path, self.modality, self.visible_img_list[0])).shape
@@ -374,6 +390,7 @@ class rgbt_ImprAssocTrack(BaseTracker):
         self.subset = os.path.basename(track_id)
         self.detects = get_img_dets(self.img_path, self.modality + '/det', '424_Two_Iwo_', 0.4)
         self.output_path = "../output_tracks/imprassoc_Two_Iwo/data/" + os.path.basename(self.img_path)
+        self.total_time=0
 
     @BaseTracker.on_first_frame_setup
     @BaseTracker.per_class_decorator
@@ -393,6 +410,7 @@ class rgbt_ImprAssocTrack(BaseTracker):
         img = infrared_preprocess(img)
 
         self.check_inputs(dets, img)
+        start_time1 = time.time()  # cmc time
 
         self.frame_count += 1
         activated_starcks = []
@@ -412,6 +430,7 @@ class rgbt_ImprAssocTrack(BaseTracker):
         # find first round association detections
         first_mask = confs > self.track_high_thresh
         dets_first = dets[first_mask]
+        time_cmc = time.time() - start_time1
 
         """Extract embeddings """
         # appearance descriptor extraction
@@ -421,6 +440,7 @@ class rgbt_ImprAssocTrack(BaseTracker):
             else:
                 # (Ndets x X) [512, 1024, 2048]
                 features_high = self.model.get_features(dets_first[:, 0:4], img)
+        start_time2 = time.time()  # tracking algorithm time
 
         if len(dets) > 0:
             """Detections"""
@@ -590,7 +610,7 @@ class rgbt_ImprAssocTrack(BaseTracker):
         self.active_tracks, self.lost_stracks = remove_duplicate_stracks(
             self.active_tracks, self.lost_stracks
         )
-
+        time_all = time.time() - start_time2 + time_cmc
         output_stracks = [track for track in self.active_tracks]
         outputs = []
         for t in output_stracks:
@@ -604,7 +624,7 @@ class rgbt_ImprAssocTrack(BaseTracker):
 
         outputs = np.asarray(outputs)
 
-        save_results(self.frame_count, self.output_path, outputs, self.modality)
+        save_results(self.frame_count, self.output_path, outputs, self.modality, time_all)
 
         return outputs
 

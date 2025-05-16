@@ -71,7 +71,7 @@ class RGBT_StrongSort(object):
         max_cos_dist = 0.2
         max_age = 30
         max_iou_dist = 0.9  # ！！！！！！！！！！！！！！！！！
-        self.exp_id = '58_r'
+        self.exp_id = '513_l'
 
         # whether track different model seperately
         self.seperate_track = False
@@ -115,7 +115,7 @@ class RGBT_StrongSort(object):
         self.visible_img_size = cv2.imread(os.path.join(self.img_path, 'visible', self.visible_img_list[0])).shape
         self.infrared_img_size = cv2.imread(os.path.join(self.img_path, 'infrared', self.infrared_img_list[0])).shape
         self.frame_len = len(self.infrared_img_list)
-        self.visible_dets_list = get_img_dets(self.img_path, 'visible/det', '424_Two_Iwo_', thres=0.4)
+        self.visible_dets_list = get_img_dets(self.img_path, 'visible/det', '424_Two_Iwo_', thres=0.4)  # '424_Two_Iwo_' # 424_woen_
         self.infrared_dets_list = get_img_dets(self.img_path, 'infrared/det', '424_Two_Iwo_', thres=0.4)
 
         self.visualize = not track_all
@@ -252,9 +252,10 @@ class RGBT_StrongSort(object):
         self.tracker.update(visible_detections, infrared_detections, self.frame_num)
 
         time_all = time.time() - start_time2 + time_cmc
-        self.total_time += time_all
+        self.total_time = time_all
 
         # output bbox identities in both modality
+
         visible_outputs = []
         for track in self.tracker.visible_tracks:
             if not track.is_confirmed() or track.time_since_update >= 1: # 尚未确认、暂未更新

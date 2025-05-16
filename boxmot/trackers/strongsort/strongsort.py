@@ -5,6 +5,8 @@ import cv2
 import os
 import csv
 import glob
+import json
+import time
 from torch import device
 from pathlib import Path
 
@@ -91,10 +93,12 @@ def get_img_dets(root_dir, sub_dir, version, thres):
     return result
 
 
-def save_results(frame_number, save_path, outputs, modality):
+def save_results(frame_number, save_path, outputs, modality, time_):
     if not os.path.exists(os.path.dirname(save_path)):
         os.makedirs(os.path.dirname(save_path))
     visible_path = save_path + '_'+modality+'.txt'
+    fps_path = os.path.dirname(save_path)+'/fps.json'
+
     if frame_number > 1:
         v_fi = open(visible_path, 'a+')
         for x in outputs:
@@ -108,6 +112,17 @@ def save_results(frame_number, save_path, outputs, modality):
                      f"{cls},1"
                      + '\n')
         v_fi.close()
+
+        try:
+            with open(fps_path, 'r+') as t_fi:
+                history_t = json.load(t_fi)
+                history_t = [history_t[0] + time_, history_t[1] + 1]
+                t_fi.seek(0)
+                json.dump(history_t, t_fi)
+                t_fi.truncate()
+        except FileNotFoundError:
+            with open(fps_path, 'w') as t_fi:
+                json.dump([time_, 1.], t_fi)
 
     elif frame_number == 1:  # refresh history records
         v_fi = open(visible_path, 'w')
@@ -164,7 +179,7 @@ class StrongSort(object):
         self.cmc = get_cmc_method('ecc')()
 
         self.frame_count = 0
-        self.modality = 'infrared'
+        self.modality = 'visible'
         self.subset = 'leftunderbasket'
 
         if track_all:
@@ -176,7 +191,8 @@ class StrongSort(object):
         self.visible_img_size = cv2.imread(os.path.join(self.img_path, self.modality, self.visible_img_list[0])).shape
         self.track_all = track_all
         self.detects = get_img_dets(self.img_path, self.modality + '/det', '424_woen_', 0.4)
-        self.output_path = "../output_tracks/strongsort_424_woen/data/" + os.path.basename(self.img_path)
+        self.output_path = "../output_tracks/strongsort_Two_Iwo/data/" + os.path.basename(self.img_path)
+        self.total_time = 0
 
     @BaseTracker.per_class_decorator
     def update(self, dets: np.ndarray, img: np.ndarray, embs: np.ndarray = None) -> np.ndarray:
@@ -210,17 +226,21 @@ class StrongSort(object):
         confs = dets[:, 4]
         clss = dets[:, 5]
         det_ind = dets[:, 6]
+        start_time1 = time.time()  # tracking algorithm time
 
         if len(self.tracker.tracks) >= 1:
             warp_matrix, _ = self.cmc.apply(img, xyxy)
             for track in self.tracker.tracks:
                 track.camera_update(warp_matrix)
+        time_cmc = time.time() - start_time1
 
         # extract appearance information for each detection
         if embs is not None:
             features = embs
         else:
             features = self.model.get_features(xyxy, img)
+
+        start_time2 = time.time()  # tracking algorithm time
 
         tlwh = xyxy2tlwh(xyxy)
         detections = [
@@ -279,8 +299,9 @@ class StrongSort(object):
             # im1 = cv2.resize(img, (1920, 1080))
             cv2.imshow('frame', img)
             cv2.waitKey()
+        time_all = time.time() - start_time2 + time_cmc
 
-        save_results(self.frame_count, self.output_path, outputs, self.modality)
+        save_results(self.frame_count, self.output_path, outputs, self.modality, time_all)
         # show_both_result(img, outputs, self.frame_count, self.subset, self.modality)
         if len(outputs) > 0:
             return np.concatenate(outputs)
