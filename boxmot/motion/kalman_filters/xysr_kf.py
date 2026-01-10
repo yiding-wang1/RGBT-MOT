@@ -189,12 +189,12 @@ class KalmanFilterXYSR(object):
             indices = np.where(np.array(occur) == 0)[0]
             index1, index2 = indices[-2], indices[-1]
             box1, box2 = new_history[index1], new_history[index2]
-            # x1, y1, s1, r1 = box1  # for deepocsort\ocsort
-            x1, y1, s1, sco1, r1 = box1  # for hybridsort
+            x1, y1, s1, r1 = box1  # for deepocsort\ocsort
+            # x1, y1, s1, sco1, r1 = box1  # for hybridsort
 
             w1, h1 = np.sqrt(s1 * r1), np.sqrt(s1 / r1)
-            # x2, y2, s2, r2 = box2
-            x2, y2, s2, sco2, r2 = box2
+            x2, y2, s2, r2 = box2
+            # x2, y2, s2, sco2, r2 = box2
 
             w2, h2 = np.sqrt(s2 * r2), np.sqrt(s2 / r2)
             time_gap = index2 - index1
@@ -205,8 +205,8 @@ class KalmanFilterXYSR(object):
                 x, y = x1 + (i + 1) * dx, y1 + (i + 1) * dy
                 w, h = w1 + (i + 1) * dw, h1 + (i + 1) * dh
                 s, r = w * h, w / float(h)
-                new_box = np.array([x, y, s, sco2, r]).reshape((5, 1))  # for hybridsort
-                # new_box = np.array([x, y, s, r]).reshape((4, 1))  # for deepocsort
+                # new_box = np.array([x, y, s, sco2, r]).reshape((5, 1))  # for hybridsort
+                new_box = np.array([x, y, s, r]).reshape((4, 1))  # for deepocsort
                 self.update(new_box)
                 if not i == (index2 - index1 - 1):
                     self.predict()

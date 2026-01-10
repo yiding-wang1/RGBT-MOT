@@ -50,6 +50,38 @@ def xyxyn2xyxy(xyxyn, img_shape):
     xyxy[:, 3] = xyxyn[:, 3] * img_shape[0]
     return xyxy
 
+def show_both_result(visible_outputs, visible_img, frame_num, subset, modality):
+    color = (0, 0, 255)  # BGR
+    thickness = 2
+    fontscale = 0.5
+    if len(visible_outputs) != 0:
+        for x in visible_outputs:
+            x1, y1, x2, y2, id, conf, cls, ind = x[0]
+            cv2.rectangle(
+                visible_img,
+                (int(x1), int(y1)),
+                (int(x2), int(y2)),
+                color,
+                thickness
+            )
+            cv2.putText(
+                visible_img,
+                f'id:{int(id)}',#,conf:{conf:.2f}',  # f'id: {id}, conf: {conf}, c: {cls}',
+                (int(x1), int(y1) - 10),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                fontscale,
+                color,
+                thickness
+            )
+    subset_=os.path.basename(subset)
+
+    save_path = f"./output_imgs_strongsort/{subset_}/{modality}/{frame_num}.jpg"
+    if not os.path.exists(os.path.dirname(save_path)):
+        os.makedirs(os.path.dirname(save_path))
+    cv2.imwrite(save_path, visible_img)
+
+    return
+
 
 def get_img_dets(root_dir, sub_dir, version, thres):
     # 拼接指定子目录的完整路径
@@ -302,7 +334,7 @@ class StrongSort(object):
         time_all = time.time() - start_time2 + time_cmc
 
         save_results(self.frame_count, self.output_path, outputs, self.modality, time_all)
-        # show_both_result(img, outputs, self.frame_count, self.subset, self.modality)
+        show_both_result(outputs, img, self.frame_count, self.img_path, self.modality)
         if len(outputs) > 0:
             return np.concatenate(outputs)
 
@@ -311,36 +343,3 @@ class StrongSort(object):
     def plot_results(img: np.ndarray, show_trajectories: bool, thickness: int = 2, fontscale: float = 0.5):
         pass
 
-
-def show_both_result(visible_img, visible_outputs, frame_num, subset, modality):
-    color = (0, 0, 255)  # BGR
-    thickness = 2
-    fontscale = 0.5
-    if len(visible_outputs) != 0:
-        for x in visible_outputs:
-            x1, y1, x2, y2, id, conf, cls, ind = x[0]
-            cv2.rectangle(
-                visible_img,
-                (int(x1), int(y1)),
-                (int(x2), int(y2)),
-                color,
-                thickness
-            )
-            cv2.putText(
-                visible_img,
-                f'id:{int(id)}',#,conf:{conf:.2f}',  # f'id: {id}, conf: {conf}, c: {cls}',
-                (int(x1), int(y1) - 10),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                fontscale,
-                color,
-                thickness
-            )
-    save_path = f"./output_imgs_strongsort/{subset}_{modality}/{frame_num}.jpg"
-    if not os.path.exists(os.path.dirname(save_path)):
-        os.makedirs(os.path.dirname(save_path))
-    cv2.imwrite(save_path, visible_img)
-    # combined_img = cv2.resize(combined_img, (0, 0), fx=0.5, fy=0.5)
-    # cv2.imshow(f'frame {frame_num}', combined_img)
-    # cv2.waitKey()
-
-    return

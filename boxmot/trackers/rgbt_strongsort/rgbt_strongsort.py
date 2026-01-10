@@ -52,8 +52,8 @@ class RGBT_StrongSort(object):
             device: device,
             half: bool,
             per_class: bool = False,
-            max_cos_dist=0.2,  #0.2
-            max_iou_dist=0.7,
+            max_cos_dist=0.2,
+            max_iou_dist=0.9,
             max_age=30,
             n_init=3,
             nn_budget=100,
@@ -62,61 +62,42 @@ class RGBT_StrongSort(object):
             track_id=0,
             track_all=True
     ):
-        # stack = inspect.stack()
+
         self.per_class = per_class
         self.model = ReidAutoBackend(
             weights=reid_weights, device=device, half=half
         ).model
-
-        max_cos_dist = 0.2
-        max_age = 30
-        max_iou_dist = 0.9  # ！！！！！！！！！！！！！！！！！
-        self.exp_id = '513_l'
-
-        # whether track different model seperately
-        self.seperate_track = False
-        if self.seperate_track:
-            self.tracker = SeperateTracker(
-                metric=NearestNeighborDistanceMetric("cosine", max_cos_dist, nn_budget),
-                max_iou_dist=max_iou_dist,
-                max_age=max_age,
-                n_init=n_init,
-                mc_lambda=mc_lambda,
-                ema_alpha=ema_alpha,
-            )
-        else:
-            self.tracker = Tracker(
-                metric=NearestNeighborDistanceMetric("cosine", max_cos_dist, nn_budget),
-                max_iou_dist=max_iou_dist,
-                max_age=max_age,
-                n_init=n_init,
-                mc_lambda=mc_lambda,
-                ema_alpha=ema_alpha,
-                exp_id=self.exp_id
-            )
+        self.exp_id = 'default'
+        self.tracker = Tracker(
+            metric=NearestNeighborDistanceMetric("cosine", max_cos_dist, nn_budget),
+            max_iou_dist=max_iou_dist,
+            max_age=max_age,
+            n_init=n_init,
+            mc_lambda=mc_lambda,
+            ema_alpha=ema_alpha,
+            exp_id=self.exp_id
+        )
         self.cmc_vi = get_cmc_method('ecc')()
         self.cmc_ir = get_cmc_method('ecc')()
 
         self.frame_num = 0
         self.total_time = 0
         self.subset = 'the2ndboyunderbasket'
+        self.dataset_path = '../data/'
 
         if track_all:
             self.img_path = track_id
             self.subset = os.path.basename(track_id)
         else:
-            self.img_path = 'E:/lasher/LasHeR_Unalined_960_0615/seleted/'+self.subset
-            #blackboy' #2ndboyfarintheforest2right'
-            # leftunderbasket,midof3girls,righthunchblack,manbikecoming
+            self.img_path = self.dataset_path + self.subset
 
-        self.dataset_path = 'E:/lasher/LasHeR_Unalined_960_0615/seleted'
         self.visible_img_list = get_img_names(self.img_path, 'visible')
         self.infrared_img_list = get_img_names(self.img_path, 'infrared')
         self.visible_img_size = cv2.imread(os.path.join(self.img_path, 'visible', self.visible_img_list[0])).shape
         self.infrared_img_size = cv2.imread(os.path.join(self.img_path, 'infrared', self.infrared_img_list[0])).shape
         self.frame_len = len(self.infrared_img_list)
-        self.visible_dets_list = get_img_dets(self.img_path, 'visible/det', '424_Two_Iwo_', thres=0.4)  # '424_Two_Iwo_' # 424_woen_
-        self.infrared_dets_list = get_img_dets(self.img_path, 'infrared/det', '424_Two_Iwo_', thres=0.4)
+        self.visible_dets_list = get_img_dets(self.img_path, '../../dets/'+self.subset+'/visible', thres=0.4)
+        self.infrared_dets_list = get_img_dets(self.img_path,  '../../dets/'+self.subset+'/infrared', thres=0.4)
 
         self.visualize = not track_all
         self.save_output = track_all
@@ -125,11 +106,6 @@ class RGBT_StrongSort(object):
 
         self.output_path = "../output_tracks/"+self.exp_id+"/data/" + os.path.basename(self.img_path)
         self.pose_only = True
-
-        # self.output_path = "../../../TrackEval-master/TrackEval-master/data/tracks/228/data/" +os.path.basename(self.img_path)
-
-        # "../../../TrackEval-master/TrackEval-master/data/tracks/228/data/"
-        # os.environ["CUDA VISIBLE DEVICES"] = "0"
 
     @BaseTracker.per_class_decorator
     def update(self, visible_dets: np.ndarray, visible_img: np.ndarray,
@@ -147,9 +123,6 @@ class RGBT_StrongSort(object):
                 visible_dets.shape[1] == 6
         ), "Unsupported 'dets' 2nd dimension lenght, valid lenghts is 6"
 
-        # read img_pairs,
-        # shared_space image pairs
-        # and det_results,
         visible_img = self.visible_img_list[self.frame_num]
         infrared_img = self.infrared_img_list[self.frame_num]
         visible_img = cv2.imread(os.path.join(self.img_path, 'visible', visible_img))
@@ -179,18 +152,11 @@ class RGBT_StrongSort(object):
         infrared_clss = infrared_dets[:, 6].astype(int)
         infrared_det_ind = infrared_dets[:, 7].astype(int)
 
-        # print(f"infrared_bbox={infrared_xyxy}")
-        # extract appearance information for each detection -- visible
-
-        # 实验：图像熵
         vi_entropies = self.detections_entropy(visible_xyxy, visible_img)
         ir_entropies = self.detections_entropy(infrared_xyxy, infrared_img)
 
         visible_features = self.model.get_features(visible_xyxy, visible_img)
-        if self.pose_only:
-            share_visible_features = visible_features
-        else:
-            share_visible_features = self.get_modality_features_deen_vi(visible_xyxy, visible_img)
+        share_visible_features = visible_features
         visible_tlwh = xyxy2tlwh(visible_xyxy)
         visible_detections = [
             Detection(box, conf, cls, det_ind, feat, share_feat, vi_entropy) for
@@ -198,8 +164,6 @@ class RGBT_StrongSort(object):
             zip(visible_tlwh, visible_confs, visible_clss, visible_det_ind, visible_features
                 , share_visible_features, vi_entropies)
         ]
-
-        start_time1 = time.time()  # cmc time
 
         if len(self.tracker.visible_tracks) >= 1:
             warp_matrix_vi, conf_cmc_vi = self.cmc_vi.apply(visible_img, visible_xyxy)
@@ -209,34 +173,8 @@ class RGBT_StrongSort(object):
                 for track in self.tracker.infrared_tracks:
                     track.camera_update(warp_matrix_vi)
 
-        # if len(self.tracker.visible_tracks) >= 1 and len(self.tracker.infrared_tracks) >= 1:
-        #     warp_matrix_vi, conf_cmc_vi = self.cmc_vi.apply(visible_img, visible_xyxy)
-        #     warp_matrix_ir, conf_cmc_ir = self.cmc_ir.apply(infrared_img, infrared_xyxy)
-        #     print(conf_cmc_vi, conf_cmc_ir)
-        #     if conf_cmc_vi == 0.:
-        #         warp_matrix_b = warp_matrix_ir
-        #     else:
-        #         warp_matrix_b = warp_matrix_vi
-        #     for track in self.tracker.visible_tracks:
-        #         track.camera_update(warp_matrix_b)
-        #     for track in self.tracker.infrared_tracks:
-        #         track.camera_update(warp_matrix_b)
-        #
-        # elif len(self.tracker.visible_tracks) >= 1:
-        #     warp_matrix_vi, conf_cmc_vi = self.cmc_vi.apply(visible_img, visible_xyxy)
-        #     for track in self.tracker.visible_tracks:
-        #         track.camera_update(warp_matrix_vi)
-        #     for track in self.tracker.infrared_tracks:
-        #         track.camera_update(warp_matrix_vi)
-
-        time_cmc = time.time() - start_time1
-
-        # extract appearance information for each detection -- infrared
         infrared_features = self.model.get_features(infrared_xyxy, infrared_img)
-        if self.pose_only:
-            share_infrared_features = infrared_features
-        else:
-            share_infrared_features = self.get_modality_features_deen_ir(infrared_xyxy, infrared_img)
+        share_infrared_features = infrared_features
         infrared_tlwh = xyxy2tlwh(infrared_xyxy)
         infrared_detections = [
             Detection(box, conf, cls, det_ind, feat, share_feat, ir_entropy) for
@@ -245,29 +183,18 @@ class RGBT_StrongSort(object):
                 infrared_features, share_infrared_features, ir_entropies)
         ]
 
-        start_time2 = time.time()  # tracking algorithm time
-
-        # update tracker with dual modality detections, within-modality features and cross-modality features
         self.tracker.predict()
         self.tracker.update(visible_detections, infrared_detections, self.frame_num)
 
-        time_all = time.time() - start_time2 + time_cmc
-        self.total_time = time_all
-
-        # output bbox identities in both modality
-
         visible_outputs = []
         for track in self.tracker.visible_tracks:
-            if not track.is_confirmed() or track.time_since_update >= 1: # 尚未确认、暂未更新
+            if not track.is_confirmed() or track.time_since_update >= 1:
                 continue
-
             x1, y1, x2, y2 = track.to_tlbr()
-
             id = track.id
             conf = track.conf
             cls = track.cls
             det_ind = track.det_ind
-
             visible_outputs.append(
                 np.concatenate(([x1, y1, x2, y2], [id], [conf], [cls], [det_ind])).reshape(1, -1)
             )
@@ -295,125 +222,18 @@ class RGBT_StrongSort(object):
         else:
             infrared_outputs = np.array([])
 
-        paired_tracks = self.tracker.paired_crossmodel_ids if not self.seperate_track else []
-
-        # print(f"visible_outputs:{visible_outputs[0,:,4]}",f"infrared_outputs:{infrared_outputs[0,:,4]}")
-        # print(f"infrared_outputs:{infrared_outputs}")
+        paired_tracks = self.tracker.paired_crossmodel_ids
 
         if self.visualize:
-            pass
-            # show_both_result(visible_outputs, infrared_outputs, copy.deepcopy(visible_img), copy.deepcopy(infrared_img),self.frame_num, self.subset)
-            # save_both_results(self.frame_num, save_path=self.output_path,
-            #                   visible_outputs=visible_outputs, infrared_outputs=infrared_outputs,
-            #                   paired_tracks=paired_tracks, separate_tracking=self.seperate_track)
-            # show_both_det(visible_xyxy, infrared_xyxy,
-            #               copy.deepcopy(visible_img), copy.deepcopy(infrared_img),
-            #               self.frame_num, self.subset, visible_confs, infrared_confs)
+            show_both_result(visible_outputs, infrared_outputs, copy.deepcopy(visible_img),
+                             copy.deepcopy(infrared_img), self.frame_num, self.subset)
+
         if self.save_output:
             save_both_results(self.frame_num, save_path=self.output_path,
                               visible_outputs=visible_outputs, infrared_outputs=infrared_outputs,
-                              paired_tracks=paired_tracks, separate_tracking=self.seperate_track, time_=self.total_time)
-            # show_both_result(visible_outputs, infrared_outputs,
-            #                  copy.deepcopy(visible_img), copy.deepcopy(infrared_img),
-            #                  self.frame_num, self.subset)
-            # show_both_det(visible_xyxy, infrared_xyxy,
-            #               copy.deepcopy(visible_img), copy.deepcopy(infrared_img),
-            #               self.frame_num, self.subset, visible_confs, infrared_confs)
+                              paired_tracks=paired_tracks, time_=self.total_time)
+
         return np.array([])
-
-    def get_modality_features_deen_vi(self, modality_xyxys, modality_img):
-        normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-        transform_test = transforms.Compose([
-            transforms.ToPILImage(),
-            transforms.Resize((384, 144)),
-            transforms.ToTensor(),
-            normalize,
-        ])
-        outputs = []
-        providers = [("CUDAExecutionProvider", {"device_id": 0})]
-        # if 'TensorrtExecutionProvider' in providers:
-        #     providers = [("CUDAExecutionProvider", {"device_id": 0}), "CPUExecutionProvider"]
-        # else:
-        #     providers = ['CPUExecutionProvider']
-        for xyxy in modality_xyxys:
-            x1, y1, x2, y2 = xyxy.astype(int)
-            ort_session = ort.InferenceSession("./weights/deen_reid_vis.onnx", providers=providers)
-            input_data = modality_img[y1:y2, x1:x2]
-            # 预处理图像
-            input_tensor = transform_test(input_data)
-            input_tensor = input_tensor.unsqueeze(0)  # 添加批次维度
-            input_data = input_tensor.numpy()
-
-            # 获取输入名称
-            input_names = [input.name for input in ort_session.get_inputs()]
-            # 运行推理
-            output1, output2 = ort_session.run(None, {input_names[0]: input_data})
-            output = output1 + output2
-            output = output[0] + output[1] + output[2]
-            outputs.append(output)
-        return np.array(outputs)
-
-    def get_modality_features_deen_ir(self, modality_xyxys, modality_img):
-        normalize = transforms.Normalize(mean=[0.496, 0.496, 0.496], std=[0.195, 0.195, 0.195])  # from ImageNet
-        transform_test = transforms.Compose([
-            transforms.ToPILImage(),
-            transforms.Resize((384, 144)),
-            transforms.ToTensor(),
-            normalize,
-        ])
-        outputs = []
-        providers = [("CUDAExecutionProvider", {"device_id": 0})]
-        # if 'TensorrtExecutionProvider' in providers:
-        #     providers = [("CUDAExecutionProvider", {"device_id": 0}), "CPUExecutionProvider"]
-        # else:
-        #     providers = ['CPUExecutionProvider']
-        for xyxy in modality_xyxys:
-            x1, y1, x2, y2 = xyxy.astype(int)
-            ort_session = ort.InferenceSession("./weights/deen_reid_ir.onnx", providers=providers)
-            input_data = modality_img[y1:y2, x1:x2]
-
-            # 预处理图像
-            input_tensor = transform_test(input_data)
-            input_tensor = input_tensor.unsqueeze(0)  # 添加批次维度
-            input_data = input_tensor.numpy()
-
-            # 获取输入名称
-            input_names = [input.name for input in ort_session.get_inputs()]
-            # 运行推理
-            output1, output2 = ort_session.run(None, {input_names[0]: input_data})
-            output = output1+output2
-            output = output[0]+output[1]+output[2]
-            outputs.append(output)
-        return np.array(outputs)
-
-    def get_modality_features_jsia(self, modality_xyxys, modality_img):
-        transform_test = transforms.Compose([
-            transforms.Resize([256, 128], interpolation=3),
-            transforms.ToTensor(),
-            transforms.Normalize(mean=[0.5] * 3, std=[0.5] * 3)
-            # we normalize it in reid model with imagenet mean and std
-        ])
-        outputs = []
-        for xyxy in modality_xyxys:
-            x1, y1, x2, y2 = xyxy.astype(int)
-            # providers = ort.get_available_providers()
-            # if 'CUDAExecutionProvider' in providers:
-            #     providers = ['CUDAExecutionProvider', 'CPUExecutionProvider']
-            # else:
-            #     providers = ['CPUExecutionProvider']
-            ort_session = ort.InferenceSession("./weights/jsia_reid.onnx")
-            input_data = Image.fromarray(modality_img[y1:y2, x1:x2], mode='RGB')
-            # 预处理图像
-            input_tensor = transform_test(input_data)
-            input_tensor = input_tensor.unsqueeze(0)  # 添加批次维度
-            input_data = input_tensor.numpy()
-
-            # 获取输入名称
-            input_names = [input.name for input in ort_session.get_inputs()]
-            # 运行推理
-            _, output = ort_session.run(None, {input_names[0]: input_data})
-            outputs.append(output)
-        return np.array(outputs)
 
     def plot_results(self, orig_img, show_trajectories):
         pass
@@ -437,20 +257,16 @@ class RGBT_StrongSort(object):
             entrophys.append(_calculate_single_channel_entropy(crop))
         return entrophys
 
+
 def get_img_names(root_dir, sub_dir):
-    # 拼接指定子目录的完整路径
     target_dir = os.path.join(root_dir, sub_dir)
-    # 使用 glob 模块查找指定子目录下所有的 .jpg 文件
     jpg_files = glob.glob(os.path.join(target_dir, '*.jpg'))
-    # 从完整文件路径中提取文件名
     file_names = [os.path.basename(file) for file in jpg_files]
     return file_names
 
 
-def get_img_dets(root_dir, sub_dir, version, thres):
-    # 拼接指定子目录的完整路径
-    target_dir = os.path.join(root_dir, sub_dir, version+'det.csv')
-    # 从完整文件路径中提取文件名
+def get_img_dets(root_dir, sub_dir, thres):
+    target_dir = os.path.join(root_dir, sub_dir, 'det.csv')
     result = {}
     with open(target_dir, 'r', newline='', encoding='utf-8') as csvfile:
         reader = csv.reader(csvfile)
@@ -468,34 +284,45 @@ def get_img_dets(root_dir, sub_dir, version, thres):
                 index = int(float_row[0])
                 if index not in result:
                     result[index] = []
-                # row.append(clk)
-                # clk+=1
                 result[index].append(row)
             except (ValueError, IndexError):
-                print(f"处理行 {float_row} 时出错，索引{index}可能不是有效的整数或者行为空。")
+                print(f"Wrong row: {float_row}")
 
     for key, value in result.items():
-        # 获取当前二维列表的行数
         rows = len(value)
         for i in range(rows):
             if len(value[i]) > 0:
-                # 如果二维列表的子列表不为空，则设置最后一列的值
                 if len(value[i]) == 1:
-                    # 如果子列表只有一个元素，则直接赋值
                     value[i] = [i]
                 else:
-                    # 否则，最后一个元素
                     value[i].append(i)
     return result
 
 
-def show_both_result(visible_outputs, infrared_outputs, visible_img, infrared_img, frame_num, subset):
-    color = (0, 0, 255)  # BGR
+def show_both_result(visible_outputs, infrared_outputs, visible_img, infrared_img, frame_num, subset, paired_tracks):
+    np.random.seed(0)
+    colors = np.random.randint(0, 255, size=(100, 3), dtype=int)
+    colors = colors.tolist()
+    colors = [tuple(color) for color in colors]
     thickness = 2
     fontscale = 0.5
+    if len(paired_tracks)!=0:
+        paired_tracks=list(paired_tracks)
+        v_pair ,i_pair = zip(*paired_tracks)
+        len_p = len(paired_tracks)
+    else:
+        v_pair, i_pair = [],[]
+        len_p = 0
+
     if len(visible_outputs) != 0:
         for x in visible_outputs:
             x1, y1, x2, y2, id, conf, cls, ind = x
+            try:
+                idx = v_pair.index(id)
+                color = colors[int(np.mod(v_pair[idx]-1,100)-1)]
+            except:
+                color = colors[len_p+int(np.mod(id,100-len_p))-1]
+            print(color)
             cv2.rectangle(
                 visible_img,
                 (int(x1), int(y1)),
@@ -505,7 +332,7 @@ def show_both_result(visible_outputs, infrared_outputs, visible_img, infrared_im
             )
             cv2.putText(
                 visible_img,
-                f'id:{int(id)}',#,conf:{conf:.2f}',  # f'id: {id}, conf: {conf}, c: {cls}',
+                f'id:{int(id)}',
                 (int(x1), int(y1) - 10),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 fontscale,
@@ -515,6 +342,11 @@ def show_both_result(visible_outputs, infrared_outputs, visible_img, infrared_im
     if len(infrared_outputs) != 0:
         for x in infrared_outputs:
             x1, y1, x2, y2, id, conf, cls, ind = x
+            try:
+                idx = i_pair.index(id)
+                color = colors[int(np.mod(v_pair[idx]-1,100)-1)]
+            except ValueError:
+                color = colors[len_p+int(np.mod(id,100-len_p))-1]
 
             cv2.rectangle(
                 infrared_img,
@@ -525,7 +357,7 @@ def show_both_result(visible_outputs, infrared_outputs, visible_img, infrared_im
             )
             cv2.putText(
                 infrared_img,
-                f'id:{int(id)}',#,conf:{conf:.2f}',  # f'id: {id}, conf: {conf}, c: {cls}',
+                f'id:{int(id)}',
                 (int(x1), int(y1) - 10),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 fontscale,
@@ -533,69 +365,12 @@ def show_both_result(visible_outputs, infrared_outputs, visible_img, infrared_im
                 thickness
             )
     combined_img = cv2.hconcat([visible_img, infrared_img])
-    save_path = f"./output_imgs_428_i/{subset}/{frame_num}.jpg"
-    if not os.path.exists(os.path.dirname(save_path)):
-        os.makedirs(os.path.dirname(save_path))
-    cv2.imwrite(save_path, combined_img)
-    # combined_img = cv2.resize(combined_img, (0, 0), fx=0.5, fy=0.5)
-    # cv2.imshow(f'frame {frame_num}', combined_img)
-    # cv2.waitKey()
-
-    return
-
-def show_both_det(visible_xyxy, infrared_xyxy, visible_img, infrared_img, frame_num, subset, visible_confs, infrared_confs):
-    color = (0, 0, 255)  # BGR
-    thickness = 2
-    fontscale = 0.5
-    for x, conf in zip(visible_xyxy, visible_confs):
-        x1,y1,x2,y2=x
-        cv2.rectangle(
-            visible_img,
-            (int(x1), int(y1)),
-            (int(x2), int(y2)),
-            color,
-            thickness
-        )
-        cv2.putText(
-            visible_img,
-            f'{conf:.2f} ',  # f'id: {id}, conf: {conf}, c: {cls}',
-            (int(x1), int(y1) - 10),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            fontscale,
-            color,
-            thickness
-        )
-    for x, conf in zip(infrared_xyxy, infrared_confs):
-        x1, y1, x2, y2 = x
-        cv2.rectangle(
-            infrared_img,
-            (int(x1), int(y1)),
-            (int(x2), int(y2)),
-            color,
-            thickness
-        )
-        cv2.putText(
-            infrared_img,
-            f'{conf:.2f} ',  # f'id: {id}, conf: {conf}, c: {cls}',
-            (int(x1), int(y1) - 10),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            fontscale,
-            color,
-            thickness
-        )
-    combined_img = cv2.hconcat([visible_img, infrared_img])
-    save_path = f"./output_imgs_det_en/{subset}_det/{frame_num}.jpg"
-    if not os.path.exists(os.path.dirname(save_path)):
-        os.makedirs(os.path.dirname(save_path))
-    cv2.imwrite(save_path, combined_img)
-    print('save successfully')
-    # combined_img = cv2.resize(combined_img, (0, 0), fx=0.5, fy=0.5)
-    # cv2.imshow('frame', combined_img)
-    # cv2.waitKey()
+    cv2.imshow(f"tracking {subset}", combined_img)
+    cv2.waitKey()
     return
 
 
-def save_both_results(frame_number, save_path, visible_outputs, infrared_outputs, paired_tracks, time_, separate_tracking=True):
+def save_both_results(frame_number, save_path, visible_outputs, infrared_outputs, paired_tracks, time_):
     if not os.path.exists(os.path.dirname(save_path)):
         os.makedirs(os.path.dirname(save_path))
     visible_path = save_path + '_visible.txt'
@@ -629,17 +404,16 @@ def save_both_results(frame_number, save_path, visible_outputs, infrared_outputs
                      + '\n')
         i_fi.close()
 
-        if not separate_tracking:
-            try:
-                with open(paired_id_path, 'rb') as p_fi:
-                    data_list = pickle.load(p_fi)
-                    p_fi.close()
-            except (FileNotFoundError, EOFError):
-                data_list = []
-            data_list.append(paired_tracks)
-            with open(paired_id_path, 'wb') as p_fi:
-                pickle.dump(data_list, p_fi)
+        try:
+            with open(paired_id_path, 'rb') as p_fi:
+                data_list = pickle.load(p_fi)
                 p_fi.close()
+        except (FileNotFoundError, EOFError):
+            data_list = []
+        data_list.append(paired_tracks)
+        with open(paired_id_path, 'wb') as p_fi:
+            pickle.dump(data_list, p_fi)
+            p_fi.close()
 
         try:
             with open(fps_path, 'r+') as t_fi:
@@ -652,9 +426,7 @@ def save_both_results(frame_number, save_path, visible_outputs, infrared_outputs
             with open(fps_path, 'w') as t_fi:
                 json.dump([time_, 1.], t_fi)
 
-        ##  !!!!!!!!!!!标签
-
-    elif frame_number == 1:  # refresh history records
+    elif frame_number == 1:
         v_fi = open(visible_path, 'w')
         v_fi.close()
         i_fi = open(infrared_path, 'w')
@@ -674,14 +446,9 @@ def xyxyn2xyxy(xyxyn, img_shape):
 
 def infrared_preprocess(image):
     clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-
-    # 分离图像的三个通道
     b, g, r = cv2.split(image)
-    # 对每个通道应用 CLAHE 算法
     b_clahe = clahe.apply(b)
     g_clahe = clahe.apply(g)
     r_clahe = clahe.apply(r)
-
-    # 合并处理后的通道
     image_clahe = cv2.merge((b_clahe, g_clahe, r_clahe))
     return image_clahe

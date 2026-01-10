@@ -42,20 +42,7 @@ def create_tracker(tracker_type, tracker_config=None, reid_weights=None, device=
     # Map tracker types to their corresponding classes
     tracker_mapping = {
         'strongsort': 'boxmot.trackers.strongsort.strongsort.StrongSort',
-        'ocsort': 'boxmot.trackers.ocsort.ocsort.OcSort',
-        'bytetrack': 'boxmot.trackers.bytetrack.bytetrack.ByteTrack',
-        'botsort': 'boxmot.trackers.botsort.botsort.BotSort',
-        'deepocsort': 'boxmot.trackers.deepocsort.deepocsort.DeepOcSort',
-        'hybridsort': 'boxmot.trackers.hybridsort.hybridsort.HybridSort',
-        'imprassoc': 'boxmot.trackers.imprassoc.imprassoctrack.ImprAssocTrack',
         'rgbt_strongsort':'boxmot.trackers.rgbt_strongsort.rgbt_strongsort.RGBT_StrongSort',
-        'rgbt_deepocsort':'boxmot.trackers.rgbt_deepocsort.rgbt_deepocsort.RGBT_DeepOcSort',
-        'rgbt_bytetrack':'boxmot.trackers.rgbt_bytetrack.rgbt_bytetrack.RGBT_ByteTrack',
-        'rgbt_hybridsort':'boxmot.trackers.rgbt_hybridsort.rgbt_hybridsort.RGBT_HybridSort',
-        'rgbt_boost': 'boxmot.trackers.boosttrack.boosttrack.BoostTrack',
-        'rgbt_imprassoc':'boxmot.trackers.rgbt_imprassoc.rgbt_imprassoctrack.rgbt_ImprAssocTrack',
-        'rgbt_botsort': 'boxmot.trackers.rgbt_botsort.botsort.RGBT_BotSort',
-        'rgbt_ocsort': 'boxmot.trackers.rgbt_ocsort.ocsort.RGBT_OcSort',
     }
 
     # Check if the tracker type exists in the mapping
@@ -68,18 +55,10 @@ def create_tracker(tracker_type, tracker_config=None, reid_weights=None, device=
     tracker_class = getattr(__import__(module_path, fromlist=[class_name]), class_name)
     
     # For specific trackers, update tracker arguments with ReID parameters
-    if tracker_type in ['strongsort', 'botsort', 'deepocsort', 'hybridsort', 'imprassoc',
-                        'rgbt_strongsort',
-                        'rgbt_deepocsort',
-                        # 'rgbt_bytetrack',
-                        'rgbt_hybridsort',
-                        'rgbt_boost',
-                        'rgbt_imprassoc',
-                        'rgbt_botsort'
-                        ]:
+    if tracker_type in ['strongsort', 'rgbt_strongsort']:
         tracker_args['per_class'] = per_class
         tracker_args.update(reid_args)
-        if tracker_type == 'strongsort' or 'rgbt_boost':
+        if tracker_type == 'strongsort':
             tracker_args.pop('per_class')  # per class not supported by
     else:
         tracker_args['per_class'] = per_class

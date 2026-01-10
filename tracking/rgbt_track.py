@@ -199,15 +199,15 @@ def parse_opt():
     parser.add_argument('--tracking-method', type=str, default='rgbt_strongsort',  # 'rgbt_strongsort'
                         help='deepocsort, botsort, strongsort, ocsort, bytetrack, imprassoc')
     parser.add_argument('--source', type=str,
-                        default='E:/lasher/LasHeR_Unalined_960_0615/seleted/leftunderbasket/infrared/',
+                        default='../data/RGBT MOT25/test/leftunderbasket/infrared/',
                         help='file/dir/URL/glob, 0 for webcam')
     parser.add_argument('--dataset_source', type=str,
-                        default='E:/lasher/LasHeR_Unalined_960_0615/seleted/',
+                        default='../data/RGBT MOT25/test/data',
                         help='file/dir/URL/glob, 0 for webcam')
     parser.add_argument('--track_all', default=True,
                         help='track all subsets at once')
     parser.add_argument('--track_id', type=str, default='',
-                        help='track all subsets at once')
+                        help='name of tracking subset')
 
     parser.add_argument('--imgsz', '--img', '--img-size', nargs='+', type=int, default=None,
                         help='inference size h,w')
@@ -259,48 +259,7 @@ def parse_opt():
 
 if __name__ == "__main__":
     opt = parse_opt()
-    train_set = [
-        "greenleftthewhite",
-        "leftunderbasket",
-        "blkboywithbluebag",
-        "blackboy",
-        "blueboywalking",
-        "blkcarfollowingwhite",
-        "boyatdoorturnright",
-        "boybackpack",
-        "e-tribike",
-        "manbikecoming",
-        "manwalkincars",
-        "midof3girls"
-    ]
-    eval_set = [
-        '2ndboyfarintheforest2right',
-        'manfromcar302',
-        'righthunchblack',
-        'runninggreenboyafterwhite',
-        'The_one_on_the_left_in_black',
-        'the2ndboyunderbasket',
-        'rightblkboy',
-        'e-tricycle',
-        'right4thboy',
-        'rightestblkboy2',
-        'whitegirl2_0115',
-        'whiteof2boys',
-        'whiteboybike',
-        'whiteboyright'
-    ]
-    eval_hard_set = [
-        'leftunderbasket',
-        'blueboywalking',
-        'blkcarfollowingwhite',
-        'boybackpack',
-        'e-tribike',
-        'manbikecoming',
-        'midof3girls',
-        '2ndboyfarintheforest2right',
-        'righthunchblack'
-    ]
-    eval_hard_set_v1=[
+    eval_set=[
         '2ndboyfarintheforest2right',
         'blueboywalking',
         'blkcarfollowingwhite',
@@ -310,7 +269,6 @@ if __name__ == "__main__":
         'manbikecoming',
         'midof3girls',
         'righthunchblack',
-        # 'runninggreenboyafterwhite',
         'right2ndfarboytakinglight2left',
         'the2ndboyunderbasket',
     ]
@@ -318,7 +276,8 @@ if __name__ == "__main__":
     if opt.track_all:
         track_id = 0
         for path in os.scandir(opt.dataset_source):
-            if path.is_dir() and os.path.basename(path) in eval_hard_set_v1:
+            print(path)
+            if path.is_dir() and os.path.basename(path) in eval_set:
                 print(os.path.basename(path))
                 opt.track_id = os.path.abspath(path)
                 opt.source = os.path.join(path, 'infrared')  # default:visible,infrared
