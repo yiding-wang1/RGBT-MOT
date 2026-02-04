@@ -85,11 +85,8 @@ class RGBT_StrongSort(object):
         self.subset = 'the2ndboyunderbasket'
         self.dataset_path = '../data/'
 
-        if track_all:
-            self.img_path = track_id
-            self.subset = os.path.basename(track_id)
-        else:
-            self.img_path = self.dataset_path + self.subset
+        self.img_path = track_id
+        self.subset = os.path.basename(track_id)
 
         self.visible_img_list = get_img_names(self.img_path, 'visible')
         self.infrared_img_list = get_img_names(self.img_path, 'infrared')
