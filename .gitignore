@@ -58,3 +58,5 @@ dist/
 boxmot/motion/cmc/*.jpg
 
 *.jpg
+
+*.log
