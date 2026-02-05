@@ -24,7 +24,7 @@ Detection results for test set with yolox_x:  [link](https://pan.baidu.com/s/1vx
 
    ```
    cd ./tracking
-   python rgbt_track
+   python rgbt_track.py
    ```
 
    
