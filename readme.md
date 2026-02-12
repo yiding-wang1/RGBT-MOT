@@ -6,8 +6,6 @@
 
 Our RGBT-MOT including EDTA, SCTA and CDKF. First, EDTA associates detections and trajectories within each sub-tracker. Second, SCTA links cross-modal trajectories. Third, CDKF updates the cross-modal trajectories, yielding the state of each object at frame *n*.
 
-
-
 ## Data Preparation:
 
 RGBT MOT25 dataset: [link](https://pan.baidu.com/s/1jinEbjznPMXGfAFBJWDCwQ?pwd=2uvw)
