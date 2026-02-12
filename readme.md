@@ -4,8 +4,6 @@
 
 ## Method Pipeline:
 
-![image-20260110095633143](C:\Users\22497\AppData\Roaming\Typora\typora-user-images\image-20260110095633143.png)
-
 Our RGBT-MOT including EDTA, SCTA and CDKF. First, EDTA associates detections and trajectories within each sub-tracker. Second, SCTA links cross-modal trajectories. Third, CDKF updates the cross-modal trajectories, yielding the state of each object at frame *n*.
 
 
